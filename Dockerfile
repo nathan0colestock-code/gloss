@@ -15,6 +15,8 @@ RUN npm ci --omit=dev
 
 # Copy application source
 COPY server.js db.js ai.js google.js auth.js context.js ./
+COPY seed-compass.js seed_roles_volume.js seed_compass_planning.js* ./
+COPY scripts/ scripts/
 COPY public/ public/
 
 # /app/data is the Fly.io persistent volume mount point.

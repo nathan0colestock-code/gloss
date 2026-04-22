@@ -87,8 +87,7 @@ const PORT = process.env.PORT || 3747;
 app.use(express.json({ limit: '2mb' }));
 
 // Sessions backed by SQLite (sessions.db in data/)
-const _sessionDbPath = path.join(__dirname, 'data', 'sessions.db');
-fs.mkdirSync(path.dirname(_sessionDbPath), { recursive: true });
+fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
 app.use(session({
   store: new SQLiteStore({ db: 'sessions.db', dir: path.join(__dirname, 'data') }),
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',

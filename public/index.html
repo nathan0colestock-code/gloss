@@ -955,12 +955,12 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 <body>
 
 <!-- Auth screen — shown before login, hidden after. Overlays everything. -->
-<div id="auth-screen" style="display:none;position:fixed;inset:0;background:var(--paper);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;">
+<div id="auth-screen" style="display:none;position:fixed;inset:0;background:var(--paper);z-index:9999;align-items:center;justify-content:center;flex-direction:column;">
   <div style="width:320px;display:flex;flex-direction:column;gap:12px;">
     <h1 style="font-family:var(--font-hand-h);font-size:32px;margin:0 0 4px;color:var(--accent)">Gloss<span style="opacity:.4">.</span></h1>
     <div id="auth-tabs" style="display:flex;gap:8px;margin-bottom:4px;">
       <button class="pill accent" id="auth-tab-login" onclick="setAuthMode('login')">Sign in</button>
-      <button class="pill ghost" id="auth-tab-register" onclick="setAuthMode('register')" id="auth-tab-register">Register</button>
+      <button class="pill ghost" id="auth-tab-register" onclick="setAuthMode('register')">Register</button>
     </div>
     <input id="auth-email" class="input" type="email" placeholder="Email" autocomplete="email">
     <input id="auth-password" class="input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAuth()">
@@ -968,7 +968,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
     <button class="pill accent" id="auth-submit" onclick="submitAuth()">Sign in</button>
   </div>
   <!-- Gemini key setup — shown after first login if no key set -->
-  <div id="gemini-setup" style="display:none;width:320px;margin-top:24px;display:flex;flex-direction:column;gap:12px;">
+  <div id="gemini-setup" style="display:none;width:320px;margin-top:24px;flex-direction:column;gap:12px;">
     <p style="font-size:13px;color:var(--ink-2);margin:0">Add your Gemini API key to enable AI parsing. Get one free at <span style="font-family:var(--font-mono);font-size:12px">aistudio.google.com</span>.</p>
     <input id="gemini-key-input" class="input mono" type="password" placeholder="AIza…" autocomplete="off" onkeydown="if(event.key==='Enter')saveGeminiKey()">
     <div id="gemini-key-error" style="color:var(--danger,#c0392b);font-size:13px;min-height:18px;"></div>
