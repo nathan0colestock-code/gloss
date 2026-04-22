@@ -1341,7 +1341,12 @@ function applyThreadingForPage(pageId, { continuation } = {}) {
   ).all(pid);
 
   let applied = 0;
+  const hasContainer = (pid) => db.prepare(
+    `SELECT COUNT(*) AS n FROM links WHERE from_type='page' AND from_id=? AND to_type IN ('collection','daily_log')`
+  ).get(pid).n > 0;
   const copy = (fromId, toId) => {
+    // Never overwrite a container the page already has — threading only fills gaps.
+    if (hasContainer(toId)) return;
     for (const cl of getCollLinks(fromId)) {
       const before = linkPageToCollection(toId, cl.to_id, Math.max(0.85, Math.min(0.95, cl.confidence || 0.9)));
       if (before) applied++;
