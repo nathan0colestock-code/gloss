@@ -21,7 +21,7 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const db = require('./db');
-const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, probePageHeader,
+const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
         classifyRowForCrossKind, generateTopicalIndexEntries } = require('./ai');
 const google = require('./google');
@@ -466,6 +466,76 @@ app.post('/api/ingest/voice', async (req, res) => {
   }
 });
 
+// Markdown ingest: paste markdown, it goes through the same pipeline as a scan
+// (Gemini parse → savePageFromParse) so collection/book/artifact/reference hints,
+// threading, entity extraction, backlog questions, and index classification all
+// apply. The page gets source_kind='markdown' and a scan_path='markdown:<uuid>'
+// sentinel — /api/pages/:id/scan will 404, /api/pages/:id/transcript returns the
+// raw markdown.
+app.post('/api/ingest/markdown', async (req, res) => {
+  const { markdown, date, title } = req.body || {};
+  if (!markdown || !markdown.trim()) return res.status(400).json({ error: 'markdown is required' });
+  const trimmed = markdown.trim();
+  const isoDate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    ? date
+    : new Date().toISOString().slice(0, 10);
+  try {
+    const recentAnswered = db.getRecentAnsweredQuestions(150);
+    const knownAliases = db.getKnownAliases();
+    const notebookGlossary = db.getGlossary();
+    const priorContext = buildPriorContext(db.getRecentPagesForContext(null, null, 5));
+    const parsed = await parseMarkdownPage(trimmed, {
+      recentAnsweredQuestions: recentAnswered,
+      knownAliases,
+      notebookGlossary,
+      priorContext,
+      userDate: isoDate,
+      userTitle: (title && String(title).trim()) || null,
+    });
+    const pageObj = (parsed.pages && parsed.pages[0]) || {};
+
+    // Force raw_ocr_text to the exact markdown as typed — Gemini's copy may drop
+    // whitespace or escape characters. The transcript endpoint serves this back.
+    pageObj.raw_ocr_text = trimmed;
+    // Markdown notes have no notebook position — clear these even if Gemini filled them.
+    pageObj.volume = null;
+    pageObj.page_number = null;
+    pageObj.continued_from = null;
+    pageObj.continued_to = null;
+
+    const scanRelPath = `markdown:${crypto.randomUUID()}`;
+    const result = savePageFromParse(pageObj, scanRelPath, null, 1, { sourceKindOverride: 'markdown' });
+
+    // Stamp captured_at to the user-selected date at noon, so daily-log grouping
+    // lands on the intended day regardless of the machine's TZ / upload time.
+    try { db.updatePage(result.page_id, { captured_at: `${isoDate}T12:00:00` }); } catch {}
+
+    // Ensure the page is filed to the daily_log for the selected date. Gemini may
+    // have already emitted a daily_log collection_hint — linkPageToDailyLog is a
+    // no-op if the link exists, so this is safe either way.
+    let dl = db.findDailyLogByDate(isoDate);
+    if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: isoDate });
+    try { db.linkPageToDailyLog(result.page_id, dl.id, 1.0); } catch {}
+
+    // Fire-and-forget AI index classification, mirroring the voice path.
+    setImmediate(() => classifyPageForIndexesInBackground(result.page_id));
+
+    res.json({
+      ok: true,
+      page_id: result.page_id,
+      date: isoDate,
+      summary: result.summary,
+      items_count: result.items_count,
+      backlog_count: result.backlog_count,
+      collections: result.collections,
+      daily_log: { id: dl.id, date: isoDate },
+    });
+  } catch (err) {
+    console.error('markdown ingest failed:', err);
+    res.status(500).json({ error: 'Markdown ingest failed', detail: err.message });
+  }
+});
+
 // Build a short text block describing recent pages' collection membership,
 // so Gemini can detect continuations. Used on every ingest.
 function buildPriorContext(contextPages) {
@@ -859,9 +929,9 @@ function _extractRoleFromProposal(proposal) {
   return m ? m[1].trim() : null;
 }
 
-function savePageFromParse(parsed, scanRelPath, idx, total, { volumeOverride, userKindHint } = {}) {
+function savePageFromParse(parsed, scanRelPath, idx, total, { volumeOverride, userKindHint, sourceKindOverride } = {}) {
   const pageId = crypto.randomUUID();
-  const sourceKind = sourceKindForIndex(idx, total);
+  const sourceKind = sourceKindOverride || sourceKindForIndex(idx, total);
 
   // If the ingest form provided a volume label, it wins over AI-detected volume.
   const effectiveVolume = (volumeOverride && String(volumeOverride).trim())
@@ -1855,18 +1925,26 @@ function learnFromAnsweredQuestion(backlogRow, answer) {
 app.get('/api/pages/:id/scan', (req, res) => {
   const page = db.getPage(req.params.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  const filePath = path.join(__dirname, 'data', page.scan_path.replace(/^\/scans\//, 'scans/'));
+  // Voice memos and markdown pages have sentinel scan_paths that don't resolve
+  // to a file. Return 404 so the UI falls back to its text renderer.
+  const sp = page.scan_path || '';
+  if (sp.startsWith('voice:') || sp.startsWith('markdown:')) return res.status(404).json({ error: 'No scan for this page' });
+  const filePath = path.join(__dirname, 'data', sp.replace(/^\/scans\//, 'scans/'));
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Scan file not found' });
   res.sendFile(filePath);
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function formatItem(item) {
-  const isVoice = item.source_kind === 'voice_memo' || (typeof item.scan_path === 'string' && item.scan_path.startsWith('voice:'));
+  const sp = typeof item.scan_path === 'string' ? item.scan_path : '';
+  const isVoice = item.source_kind === 'voice_memo' || sp.startsWith('voice:');
+  const isMarkdown = item.source_kind === 'markdown' || sp.startsWith('markdown:');
   const dateOnly = (item.captured_at || '').slice(0, 10);
   let citation;
   if (isVoice) {
     citation = dateOnly ? `🎙 ${dateOnly}` : '🎙';
+  } else if (isMarkdown) {
+    citation = dateOnly ? `📝 ${dateOnly}` : '📝';
   } else if (item.volume) {
     citation = `→ v.${item.volume} p.${item.page_number ?? '?'}`;
   } else {
@@ -3123,16 +3201,19 @@ function reclassifyCollectionKind(collectionId, nextKind) {
   return { reclassified_to: nextKind };
 }
 
-// ── Raw transcript (voice memos) ────────────────────────────────────────────
+// ── Raw transcript / body (voice memos + markdown) ──────────────────────────
 app.get('/api/pages/:id/transcript', (req, res) => {
   const pg = db.getPageTranscript(req.params.id);
   if (!pg) return res.status(404).json({ error: 'Not found' });
+  const isVoice = pg.source_kind === 'voice_memo' || (pg.scan_path && pg.scan_path.startsWith('voice:'));
+  const isMarkdown = pg.source_kind === 'markdown' || (pg.scan_path && pg.scan_path.startsWith('markdown:'));
   res.json({
     id: pg.id,
     source_kind: pg.source_kind,
     captured_at: pg.captured_at,
     summary: pg.summary,
-    is_voice: pg.source_kind === 'voice_memo' || (pg.scan_path && pg.scan_path.startsWith('voice:')),
+    is_voice: isVoice,
+    is_markdown: isMarkdown,
     transcript: pg.raw_ocr_text || '',
   });
 });

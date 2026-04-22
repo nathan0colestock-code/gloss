@@ -3730,9 +3730,11 @@ function getPageDetail(pageId) {
   const questions = getPendingBacklogForPage(pageId);
   const siblings = getPageSiblings(pageId, collections);
 
-  // Spread pages — all pages sharing this page's scan_path, ordered by page_number
+  // Spread pages — all pages sharing this page's scan_path, ordered by page_number.
+  // Voice memos and markdown notes use per-page sentinel scan_paths and are never
+  // part of a spread, so skip the lookup for them.
   let spread_pages = [];
-  if (page.scan_path && !page.scan_path.startsWith('voice:')) {
+  if (page.scan_path && !page.scan_path.startsWith('voice:') && !page.scan_path.startsWith('markdown:')) {
     spread_pages = db.prepare(`
       SELECT id, volume, page_number, scan_path, summary, captured_at, source_kind, rotation
       FROM pages WHERE scan_path = ?

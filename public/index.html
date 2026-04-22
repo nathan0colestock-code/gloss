@@ -670,6 +670,75 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   margin-bottom: 8px;
 }
 
+/* Markdown page body — retro terminal-ish look: monospace, slightly muted paper,
+   soft scanline-free but with a subtle inset border so it reads as "rendered text"
+   the way the scan frame reads as "rendered image". */
+.md-frame {
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  padding: 20px 24px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  box-shadow: inset 0 0 0 1px var(--paper);
+  letter-spacing: 0.01em;
+  overflow-wrap: break-word;
+}
+.md-frame h1, .md-frame h2, .md-frame h3 {
+  font-family: var(--font-mono);
+  margin: 1.2em 0 0.4em;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.md-frame h1:first-child, .md-frame h2:first-child, .md-frame h3:first-child { margin-top: 0; }
+.md-frame h1 { font-size: 17px; text-transform: uppercase; border-bottom: 1px dashed var(--rule); padding-bottom: 6px; }
+.md-frame h2 { font-size: 15px; }
+.md-frame h3 { font-size: 13.5px; color: var(--ink-soft); }
+.md-frame p { margin: 0.7em 0; }
+.md-frame ul, .md-frame ol { margin: 0.5em 0; padding-left: 1.6em; }
+.md-frame li { margin: 0.15em 0; }
+.md-frame li.md-task { list-style: none; margin-left: -1.4em; }
+.md-frame li.md-task .md-box { display: inline-block; width: 1.4em; color: var(--accent); }
+.md-frame li.md-task.done { color: var(--ink-faint); text-decoration: line-through; }
+.md-frame blockquote {
+  margin: 0.8em 0;
+  padding: 2px 14px;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-soft);
+  font-style: normal;
+}
+.md-frame code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 5px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.md-frame pre {
+  margin: 0.8em 0;
+  padding: 12px 14px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.md-frame pre code { border: none; padding: 0; background: transparent; }
+.md-frame a { color: var(--accent); text-decoration: underline; }
+.md-frame hr { border: none; border-top: 1px dashed var(--rule); margin: 1.2em 0; }
+.md-frame strong { font-weight: 600; }
+.md-frame em { font-style: italic; }
+.day-tile .thumb.md {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  color: var(--ink-faint);
+  background: var(--paper-2);
+}
+
 .meta-row {
   display: flex; align-items: center; gap: 18px;
   margin: 16px 0;
@@ -744,6 +813,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .ctx-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .ctx-badge { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
 .ctx-badge.voice { background: color-mix(in srgb, var(--ink-soft) 12%, transparent); color: var(--ink-soft); }
+.ctx-badge.md { background: color-mix(in srgb, var(--ink-soft) 12%, transparent); color: var(--ink-soft); font-family: var(--font-mono); letter-spacing: 0.04em; }
 .ctx-badge.date { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); cursor: pointer; }
 .ctx-badge.date:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .ctx-badge.coll { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-soft); }
@@ -1054,6 +1124,123 @@ function toast(msg, kind = '') {
 }
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
+
+// Tiny markdown → HTML renderer for rendering user-authored .md pages in the
+// page viewer. Supports the common subset: headings, bold, italic, code (inline
+// + fenced), links, blockquotes, unordered + ordered lists, task lists ([ ]/[x]),
+// horizontal rules, paragraphs. All text is escaped before inline formatting is
+// applied; no raw HTML passthrough.
+function renderMarkdown(src) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const inline = (s) => {
+    let out = esc(s);
+    // Inline code first so its content isn't mangled by the other rules.
+    const codeStash = [];
+    out = out.replace(/`([^`\n]+)`/g, (_, c) => { codeStash.push(c); return `${codeStash.length - 1}`; });
+    // Links [text](url) — url only allows http(s)/mailto to avoid javascript: etc.
+    out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, href) => {
+      const safe = /^(https?:|mailto:|\/|#)/i.test(href) ? href : '#';
+      return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    });
+    out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    out = out.replace(/(^|[\s(])_([^_\n]+)_/g, '$1<em>$2</em>');
+    out = out.replace(/(\d+)/g, (_, i) => `<code>${codeStash[+i]}</code>`);
+    return out;
+  };
+
+  const lines = String(src || '').replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+  const flushPara = (buf) => {
+    if (!buf.length) return;
+    out.push(`<p>${inline(buf.join(' '))}</p>`);
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block
+    const fence = line.match(/^```(\w+)?\s*$/);
+    if (fence) {
+      i++;
+      const code = [];
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
+      if (i < lines.length) i++;
+      out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^(-\s*){3,}$/.test(line.trim()) || /^(\*\s*){3,}$/.test(line.trim())) {
+      out.push('<hr>'); i++; continue;
+    }
+
+    // Heading
+    const hm = line.match(/^(#{1,6})\s+(.*)$/);
+    if (hm) {
+      const level = Math.min(hm[1].length, 3);
+      out.push(`<h${level}>${inline(hm[2])}</h${level}>`);
+      i++; continue;
+    }
+
+    // Blockquote (contiguous `> `)
+    if (/^>\s?/.test(line)) {
+      const quoted = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoted.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      out.push(`<blockquote>${inline(quoted.join(' '))}</blockquote>`);
+      continue;
+    }
+
+    // Unordered list (including task lists)
+    if (/^[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[-*+]\s+/.test(lines[i])) {
+        const body = lines[i].replace(/^[-*+]\s+/, '');
+        const taskUnchecked = body.match(/^\[\s\]\s+(.*)$/);
+        const taskChecked   = body.match(/^\[[xX]\]\s+(.*)$/);
+        if (taskChecked)        items.push(`<li class="md-task done"><span class="md-box">☑</span>${inline(taskChecked[1])}</li>`);
+        else if (taskUnchecked) items.push(`<li class="md-task"><span class="md-box">☐</span>${inline(taskUnchecked[1])}</li>`);
+        else                    items.push(`<li>${inline(body)}</li>`);
+        i++;
+      }
+      out.push(`<ul>${items.join('')}</ul>`);
+      continue;
+    }
+
+    // Ordered list
+    if (/^\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        items.push(`<li>${inline(lines[i].replace(/^\d+\.\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ol>${items.join('')}</ol>`);
+      continue;
+    }
+
+    // Blank line
+    if (!line.trim()) { i++; continue; }
+
+    // Paragraph: gather contiguous non-blank, non-special lines.
+    const buf = [];
+    while (
+      i < lines.length && lines[i].trim() &&
+      !/^(#{1,6})\s+/.test(lines[i]) &&
+      !/^```/.test(lines[i]) &&
+      !/^>\s?/.test(lines[i]) &&
+      !/^[-*+]\s+/.test(lines[i]) &&
+      !/^\d+\.\s+/.test(lines[i]) &&
+      !/^(-\s*){3,}$/.test(lines[i].trim())
+    ) { buf.push(lines[i]); i++; }
+    flushPara(buf);
+  }
+
+  return out.join('\n');
+}
 function ymNow() { return todayIso().slice(0, 7); }
 function ymShift(ym, delta) {
   const [y, m] = ym.split('-').map(Number);
@@ -1200,6 +1387,67 @@ lb.addEventListener('click', (e) => {
     lbImg.style.transform = (zoomed ? 'scale(1.8) ' : '') + `rotate(${lbImg.dataset.rotation || 0}deg)`;
   }
 });
+
+// Markdown composer — a small modal used by the tree drawer's "+ New markdown"
+// button. The capture tab has its own inline composer; this one pops over
+// whatever surface the user is on so they don't lose context.
+function openMarkdownComposer({ onFiled } = {}) {
+  const backdrop = h('div', { style: {
+    position: 'fixed', inset: '0', background: 'rgba(15,12,9,0.55)',
+    zIndex: '500', display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+    paddingTop: '6vh', backdropFilter: 'blur(4px)',
+  }});
+  const panel = h('div', { style: {
+    background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 'var(--r)',
+    width: 'min(820px, 92vw)', maxHeight: '86vh', display: 'flex', flexDirection: 'column',
+    boxShadow: 'var(--shadow-card)', padding: '20px 22px 18px',
+  }});
+  const title = h('div', { style: { fontFamily: 'var(--font-mono)', fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: '10px' } }, 'New markdown note');
+  const date = h('input', { type: 'date', class: 'input', value: todayIso(), style: { maxWidth: '180px' } });
+  const text = h('textarea', {
+    class: 'input',
+    rows: 14,
+    placeholder: '# Title of the note\n\nYour thoughts here. Markdown renders in mono.\n\n- a list item\n- [ ] a task\n- [x] a done task\n\n> a quoted line\n',
+    style: { fontFamily: 'var(--font-mono)', fontSize: '12.5px', marginTop: '10px', resize: 'vertical' },
+  });
+  const cancel = h('button', { class: 'btn' }, 'Cancel');
+  const file = h('button', { class: 'btn primary' }, 'File markdown');
+  const actions = h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' } }, cancel, file);
+
+  panel.append(
+    title,
+    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
+      h('span', { class: 'lbl-mono' }, 'Date'), date,
+    ),
+    text, actions,
+  );
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+
+  const close = () => backdrop.remove();
+  cancel.addEventListener('click', close);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  const escHandler = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); } };
+  document.addEventListener('keydown', escHandler);
+
+  file.addEventListener('click', async () => {
+    const t = text.value.trim();
+    if (!t) { toast('Nothing to file', 'err'); return; }
+    file.disabled = true; file.textContent = 'Parsing…';
+    try {
+      const res = await api('/api/ingest/markdown', 'POST', { markdown: t, date: date.value });
+      toast(`Filed to ${date.value}`, 'ok');
+      close();
+      if (typeof onFiled === 'function') onFiled(res);
+      if (res && res.page_id) openPageDetail(res.page_id);
+    } catch (err) {
+      toast(err.message, 'err');
+      file.disabled = false; file.textContent = 'File markdown';
+    }
+  });
+
+  setTimeout(() => text.focus(), 20);
+}
 
 // ─── Editable helpers ──────────────────────
 function editableField({ value, className = 'editable-text', placeholder = 'Click to edit…', multiline = true, onSave }) {
@@ -1461,16 +1709,20 @@ async function openDayDetail(id) {
     for (const [scanPath, group] of groups) {
       const first = group[0];
       const isVoice = first.source_kind === 'voice_memo' || (first.scan_path || '').startsWith('voice:');
+      const isMarkdown = first.source_kind === 'markdown' || (first.scan_path || '').startsWith('markdown:');
       const thumb = isVoice
         ? h('div', { class: 'thumb voice' }, '♪')
-        : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy' }));
+        : isMarkdown
+          ? h('div', { class: 'thumb md' }, '{ }')
+          : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy' }));
       const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
       const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
+      const tag = isVoice ? ' · voice' : (isMarkdown ? ' · markdown' : '');
       const tile = h('div', { class: 'day-tile' },
         thumb,
         h('div', { class: 'tile-body' },
           h('div', { class: 'captions' }, caps),
-          h('div', { class: 'tile-meta' }, `${group.length} page${group.length > 1 ? 's' : ''}${isVoice ? ' · voice' : ''}${meta ? ' · ' + meta : ''}`),
+          h('div', { class: 'tile-meta' }, `${group.length} page${group.length > 1 ? 's' : ''}${tag}${meta ? ' · ' + meta : ''}`),
         ),
       );
       tile.addEventListener('click', () => {
@@ -1546,7 +1798,11 @@ let detailBackContext = null; // { label, action }
 
 function renderPageDetail(p) {
   detailInner.innerHTML = '';
-  const title = p.volume && p.page_number ? `Vol ${p.volume} · p.${p.page_number}` : (p.source_kind === 'voice_memo' ? 'Voice memo' : 'Page');
+  const _isVoice = p.source_kind === 'voice_memo' || (p.scan_path || '').startsWith('voice:');
+  const _isMarkdown = p.source_kind === 'markdown' || (p.scan_path || '').startsWith('markdown:');
+  const title = p.volume && p.page_number
+    ? `Vol ${p.volume} · p.${p.page_number}`
+    : (_isVoice ? 'Voice memo' : (_isMarkdown ? 'Markdown note' : 'Page'));
 
   const headLeft = h('div', null,
     detailBackContext ? h('button', {
@@ -1565,7 +1821,8 @@ function renderPageDetail(p) {
   );
 
   const body = h('div', { style: { padding: '20px 4px' } });
-  const isVoice = p.source_kind === 'voice_memo' || (p.scan_path || '').startsWith('voice:');
+  const isVoice = _isVoice;
+  const isMarkdown = _isMarkdown;
 
   if (isVoice) {
     if (p.summary) {
@@ -1589,6 +1846,20 @@ function renderPageDetail(p) {
       transcriptBox.classList.remove('soft');
       transcriptBox.textContent = text || '(no transcript available)';
     });
+  } else if (isMarkdown) {
+    // Rendered markdown (mono/retro look). Source is shown read-only — recreate
+    // the note if you want to change it.
+    const frame = h('div', { class: 'md-frame' }, 'Loading…');
+    body.appendChild(frame);
+    const renderInto = (raw) => {
+      frame.innerHTML = renderMarkdown(raw || '') || '<p class="soft">(empty note)</p>';
+    };
+    const cached = p.raw_ocr_text || '';
+    if (cached) renderInto(cached);
+    api(`/api/pages/${p.id}/transcript`).then(t => {
+      const text = (t && (t.transcript || t.text)) || cached;
+      renderInto(text);
+    }).catch(() => { if (!cached) renderInto(''); });
   } else {
     const rotation = p.rotation || 0;
     const img = h('img', {
@@ -1618,7 +1889,7 @@ function renderPageDetail(p) {
   }
 
   const metaRow = h('div', { class: 'meta-row' });
-  const isNotebookScan = !isVoice && p.source_kind !== 'artifact' && p.source_kind !== 'reference';
+  const isNotebookScan = !isVoice && !isMarkdown && p.source_kind !== 'artifact' && p.source_kind !== 'reference';
   if (isNotebookScan) {
     metaRow.append(
       h('span', null, h('span', { class: 'k' }, 'vol'),
@@ -1644,7 +1915,7 @@ function renderPageDetail(p) {
   if (metaRow.children.length) body.appendChild(metaRow);
 
   if (!isVoice) {
-    body.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '6px', marginBottom: '4px' } }, 'Summary'));
+    body.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: isMarkdown ? '20px' : '6px', marginBottom: '4px' } }, 'Summary'));
     body.appendChild(editableField({
       value: p.summary || '',
       className: 'editable-text summary',
@@ -1927,6 +2198,41 @@ async function renderCapture() {
     vText, vBtn,
   );
   grid.appendChild(voiceZone);
+
+  // Markdown — user-authored note, parsed like a scan, rendered in mono.
+  const mdZone = h('div', { class: 'cap-zone' });
+  mdZone.appendChild(h('h3', null, 'Markdown'));
+  mdZone.appendChild(h('div', { class: 'sub' }, 'Write a note in markdown. Parsed into pointer-summaries and filed to the day (or to a collection derived from the title).'));
+  const mdDate = h('input', { type: 'date', class: 'input', value: todayIso(), style: { maxWidth: '180px' } });
+  const mdText = h('textarea', {
+    class: 'input',
+    rows: 8,
+    placeholder: '# On catechesis\n\nScaffolding, not cage. Three notes:\n\n- formation moves slow\n- repetition is not rote\n- the liturgy teaches',
+    style: { marginTop: '10px', fontFamily: 'var(--font-mono)', fontSize: '12.5px' },
+  });
+  const mdBtn = h('button', { class: 'btn primary', style: { marginTop: '12px' } }, 'File markdown');
+  mdBtn.addEventListener('click', async () => {
+    const t = mdText.value.trim();
+    if (!t) { toast('Nothing to file', 'err'); return; }
+    try {
+      mdBtn.disabled = true;
+      mdBtn.textContent = 'Parsing…';
+      const res = await api('/api/ingest/markdown', 'POST', { markdown: t, date: mdDate.value });
+      toast(`Filed to ${mdDate.value}`, 'ok');
+      mdText.value = '';
+      await loadBacklog(streamHost);
+      if (res && res.page_id) openPageDetail(res.page_id);
+    } catch (err) { toast(err.message, 'err'); }
+    finally { mdBtn.disabled = false; mdBtn.textContent = 'File markdown'; }
+  });
+  mdZone.append(
+    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
+      h('span', { class: 'lbl-mono' }, 'Date'),
+      mdDate,
+    ),
+    mdText, mdBtn,
+  );
+  grid.appendChild(mdZone);
 }
 
 async function startScanIngest(file, kindHint, host) {
@@ -2145,6 +2451,17 @@ async function renderIndex(focusKind, focusId) {
         } catch (err) { toast(err.message, 'err'); }
       });
       toolbar.appendChild(btn);
+    }
+    // Collections index also gets "+ New markdown" — a user-authored note filed
+    // the same way as a scan or voice memo. Gemini derives the collection hint
+    // from the first heading, so a new markdown note typically spawns or joins
+    // a topical collection right away.
+    if (kind === 'collection') {
+      const mdBtn = h('button', { class: 'btn sm' }, '+ New markdown');
+      mdBtn.addEventListener('click', () => openMarkdownComposer({
+        onFiled: () => { invalidateIndexCache(); mainInner.innerHTML = ''; renderIndex(kind); },
+      }));
+      toolbar.appendChild(mdBtn);
     }
     if (toolbar.children.length) host.appendChild(toolbar);
 
@@ -2595,15 +2912,19 @@ function renderEntityDetail(kind, node, conn) {
     for (const [, group] of groups) {
       const first = group[0];
       const isVoice = first.source_kind === 'voice_memo' || (first.scan_path || '').startsWith('voice:');
+      const isMarkdown = first.source_kind === 'markdown' || (first.scan_path || '').startsWith('markdown:');
       const thumb = isVoice
         ? h('div', { class: 'thumb voice' }, '♪')
-        : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy' }));
+        : isMarkdown
+          ? h('div', { class: 'thumb md' }, '{ }')
+          : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy' }));
       const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
       const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
 
-      // Context badges: source (voice, date, collection, artifact, reference)
+      // Context badges: source (voice, markdown, date, collection, artifact, reference)
       const ctxBadges = [];
       if (isVoice) ctxBadges.push(h('span', { class: 'ctx-badge voice' }, '♪ voice memo'));
+      if (isMarkdown) ctxBadges.push(h('span', { class: 'ctx-badge md' }, '{ } markdown'));
       const dlDate = first.daily_log_date;
       if (dlDate) {
         const [y, mo, d] = dlDate.split('-');
