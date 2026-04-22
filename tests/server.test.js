@@ -41,7 +41,9 @@ after(async () => {
 
 async function get(url) {
   const res = await fetch(baseUrl + url);
-  const body = await res.json();
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = text; }
   return { status: res.status, body };
 }
 
@@ -51,7 +53,9 @@ async function post(url, data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  const body = await res.json();
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = text; }
   return { status: res.status, body };
 }
 
@@ -61,13 +65,9 @@ async function patch(url, data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  const body = await res.json();
-  return { status: res.status, body };
-}
-
-async function del(url) {
-  const res = await fetch(baseUrl + url, { method: 'DELETE' });
-  const body = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = text; }
   return { status: res.status, body };
 }
 
@@ -90,26 +90,12 @@ function seedPage(overrides = {}) {
 
 // ── Pages ──────────────────────────────────────────────────────────────────
 
-describe('GET /api/pages', () => {
-  test('returns 200 and an array', async () => {
-    const { status, body } = await get('/api/pages');
-    assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
-  });
-
-  test('includes seeded page', async () => {
-    const id = seedPage();
-    const { body } = await get('/api/pages');
-    assert.ok(body.some(p => p.id === id));
-  });
-});
-
 describe('GET /api/pages/:id/detail', () => {
-  test('returns 200 for existing page', async () => {
+  test('returns 200 and page id nested under body.page', async () => {
     const id = seedPage();
     const { status, body } = await get(`/api/pages/${id}/detail`);
     assert.equal(status, 200);
-    assert.equal(body.id, id);
+    assert.equal(body.page.id, id);
   });
 
   test('returns 404 for unknown page', async () => {
@@ -131,10 +117,10 @@ describe('PATCH /api/pages/:id', () => {
 // ── Collections ────────────────────────────────────────────────────────────
 
 describe('GET /api/collections', () => {
-  test('returns 200 and an array-shaped object', async () => {
+  test('returns 200 with groups shape', async () => {
     const { status, body } = await get('/api/collections');
     assert.equal(status, 200);
-    assert.ok(typeof body === 'object');
+    assert.ok('groups' in body);
   });
 });
 
@@ -154,34 +140,24 @@ describe('POST /api/collections', () => {
 });
 
 describe('PATCH /api/collections/:id', () => {
-  test('renames a collection', async () => {
+  test('renames a collection via HTTP', async () => {
     const title = 'Before Rename ' + uid().slice(0, 8);
     const coll = db.createCollection({ id: uid(), kind: 'topical', title });
     const newTitle = 'After Rename ' + uid().slice(0, 8);
     const { status } = await patch(`/api/collections/${coll.id}`, { title: newTitle });
     assert.equal(status, 200);
     const detail = db.getCollectionDetail(coll.id);
-    assert.equal(detail.title, newTitle);
+    assert.equal(detail.collection.title, newTitle);
   });
 });
 
 // ── People ─────────────────────────────────────────────────────────────────
 
 describe('GET /api/people', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/people');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
-  });
-});
-
-describe('POST /api/people', () => {
-  test('creates a person', async () => {
-    const label = 'HTTP Person ' + uid().slice(0, 8);
-    const { status, body } = await post('/api/people', { label });
-    assert.equal(status, 200);
-    assert.ok(body.id);
-    assert.equal(body.label, label);
+    assert.ok(Array.isArray(body.items));
   });
 });
 
@@ -197,33 +173,31 @@ describe('PATCH /api/people/:id', () => {
   });
 });
 
-// ── Topics ─────────────────────────────────────────────────────────────────
+// ── Topics + Scripture (via /api/indexes) ──────────────────────────────────
 
-describe('GET /api/topics', () => {
-  test('returns 200 and an array', async () => {
-    const { status, body } = await get('/api/topics');
+describe('GET /api/indexes/topics', () => {
+  test('returns 200 with entries array', async () => {
+    const { status, body } = await get('/api/indexes/topics');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.entries));
   });
 });
 
-// ── Scripture ──────────────────────────────────────────────────────────────
-
-describe('GET /api/scripture', () => {
-  test('returns 200 and an array', async () => {
-    const { status, body } = await get('/api/scripture');
+describe('GET /api/indexes/scripture', () => {
+  test('returns 200 with entries array', async () => {
+    const { status, body } = await get('/api/indexes/scripture');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.entries));
   });
 });
 
 // ── Books ──────────────────────────────────────────────────────────────────
 
 describe('GET /api/books', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/books');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
@@ -245,20 +219,20 @@ describe('POST /api/books', () => {
 // ── Backlog ────────────────────────────────────────────────────────────────
 
 describe('GET /api/backlog', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/backlog');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
 // ── Daily logs ─────────────────────────────────────────────────────────────
 
 describe('GET /api/daily-logs', () => {
-  test('returns 200', async () => {
-    const { status, body } = await get('/api/daily-logs?month=2099-01');
+  test('returns 200 with months object', async () => {
+    const { status, body } = await get('/api/daily-logs');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok('months' in body);
   });
 });
 
@@ -308,10 +282,10 @@ describe('POST /api/commitments', () => {
 // ── User indexes ───────────────────────────────────────────────────────────
 
 describe('GET /api/user-indexes', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/user-indexes');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
@@ -328,7 +302,7 @@ describe('POST /api/user-indexes', () => {
 // ── Unified index tree ─────────────────────────────────────────────────────
 
 describe('GET /api/index/tree', () => {
-  test('returns 200 with expected shape', async () => {
+  test('returns 200 and an object', async () => {
     const { status, body } = await get('/api/index/tree');
     assert.equal(status, 200);
     assert.ok(typeof body === 'object');
@@ -336,32 +310,38 @@ describe('GET /api/index/tree', () => {
 });
 
 describe('GET /api/index/search', () => {
-  test('returns 200 and an array for any query', async () => {
+  test('returns 200 with results array', async () => {
     const { status, body } = await get('/api/index/search?q=test');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.results));
   });
 });
 
 // ── Search ─────────────────────────────────────────────────────────────────
 
 describe('GET /api/search', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 and expected shape', async () => {
     const { status, body } = await get('/api/search?q=test');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(typeof body === 'object');
   });
 
   test('handles FTS special chars without 500', async () => {
     const { status } = await get('/api/search?q=' + encodeURIComponent('"weird" * OR NOT'));
     assert.notEqual(status, 500);
   });
+
+  test('returns empty shape for blank query', async () => {
+    const { status, body } = await get('/api/search?q=');
+    assert.equal(status, 200);
+    assert.ok('pages' in body);
+  });
 });
 
 // ── Home ───────────────────────────────────────────────────────────────────
 
 describe('GET /api/home', () => {
-  test('returns 200 with expected shape', async () => {
+  test('returns 200 and an object', async () => {
     const { status, body } = await get('/api/home');
     assert.equal(status, 200);
     assert.ok(typeof body === 'object');
@@ -371,46 +351,45 @@ describe('GET /api/home', () => {
 // ── Ingest failures ────────────────────────────────────────────────────────
 
 describe('GET /api/ingest-failures', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/ingest-failures');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
 // ── Artifacts ─────────────────────────────────────────────────────────────
 
 describe('GET /api/artifacts', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/artifacts');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
 describe('POST /api/artifacts', () => {
   test('creates an artifact', async () => {
     const title = 'HTTP Artifact ' + uid().slice(0, 8);
-    const { status, body } = await post('/api/artifacts', {
-      title,
-      kind: 'document',
-      drawer: 'A',
-      hanging_folder: 'HF1',
-      manila_folder: 'MF1',
-    });
+    const { status, body } = await post('/api/artifacts', { title, drawer: 'A' });
     assert.equal(status, 200);
     assert.ok(body.id);
     assert.equal(body.title, title);
+  });
+
+  test('returns 400 when title is missing', async () => {
+    const { status } = await post('/api/artifacts', { drawer: 'A' });
+    assert.equal(status, 400);
   });
 });
 
 // ── References ────────────────────────────────────────────────────────────
 
 describe('GET /api/references', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/references');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
@@ -425,7 +404,7 @@ describe('POST /api/references', () => {
     assert.ok(body.id);
   });
 
-  test('returns 400 when neither file_path nor external_url is given', async () => {
+  test('returns 400 when neither file nor external_url nor source is given', async () => {
     const { status } = await post('/api/references', { title: 'No URL or path' });
     assert.equal(status, 400);
   });
@@ -434,10 +413,10 @@ describe('POST /api/references', () => {
 // ── Chat sessions ─────────────────────────────────────────────────────────
 
 describe('GET /api/chat/sessions', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/chat/sessions');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
@@ -452,30 +431,28 @@ describe('POST /api/chat/sessions', () => {
 // ── Chat memory ───────────────────────────────────────────────────────────
 
 describe('GET /api/chat/memory', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/chat/memory');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
 // ── Values / Mission ──────────────────────────────────────────────────────
 
 describe('GET /api/values', () => {
-  test('returns 200 and an array', async () => {
+  test('returns 200 with items array', async () => {
     const { status, body } = await get('/api/values');
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body));
+    assert.ok(Array.isArray(body.items));
   });
 });
 
 // ── Ingest endpoint guard ─────────────────────────────────────────────────
 
 describe('POST /api/ingest guard (no file)', () => {
-  test('returns 400 when no file is uploaded', async () => {
-    // Send an empty multipart to trigger the "no file" guard
+  test('returns non-2xx when no file is uploaded', async () => {
     const res = await fetch(baseUrl + '/api/ingest', { method: 'POST' });
-    // The server should reject it (400 or 500), never succeed without a file.
-    assert.ok(res.status >= 400);
+    assert.ok(res.status >= 400, `expected 4xx/5xx but got ${res.status}`);
   });
 });

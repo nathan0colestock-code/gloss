@@ -297,9 +297,13 @@ db.exec(`
 // support AI-generated indexes: is_ai_generated flag, structure_description
 // (the user's prompt + LLM-authored structure summary — reused as classifier
 // context), and last_classified_at (timestamp of the most recent full sweep).
+// books is created later in this file (line ~1077); guard so fresh DBs don't error.
 {
-  const cols = db.pragma('table_info(books)').map(c => c.name);
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE books ADD COLUMN archived_at TEXT');
+  const booksExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='books'").get();
+  if (booksExists) {
+    const cols = db.pragma('table_info(books)').map(c => c.name);
+    if (!cols.includes('archived_at')) db.exec('ALTER TABLE books ADD COLUMN archived_at TEXT');
+  }
 }
 {
   const cols = db.pragma('table_info(user_indexes)').map(c => c.name);
@@ -335,6 +339,8 @@ db.exec(`
 // One-time migration: copy existing same-kind parent_id rows into index_parents.
 // Old parent_id columns stay in place (non-destructive); new code should read
 // and write via the index_parents helpers below.
+// Guard on column existence so fresh DBs (where parent_id is added later via
+// ALTER TABLE) don't fail — on a fresh DB there are no rows to copy anyway.
 {
   const exists = db.prepare(`SELECT COUNT(*) as c FROM index_parents`).get().c;
   if (exists === 0) {
@@ -343,13 +349,19 @@ db.exec(`
       INSERT OR IGNORE INTO index_parents (id, child_kind, child_id, parent_kind, parent_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
-    const collParents = db.prepare(`SELECT id, parent_id FROM collections WHERE parent_id IS NOT NULL AND parent_id != ''`).all();
-    for (const r of collParents) {
-      ins.run(`ip_${r.id}_${r.parent_id}`, 'collection', r.id, 'collection', r.parent_id, now);
+    const collCols = db.pragma('table_info(collections)').map(c => c.name);
+    if (collCols.includes('parent_id')) {
+      const collParents = db.prepare(`SELECT id, parent_id FROM collections WHERE parent_id IS NOT NULL AND parent_id != ''`).all();
+      for (const r of collParents) {
+        ins.run(`ip_${r.id}_${r.parent_id}`, 'collection', r.id, 'collection', r.parent_id, now);
+      }
     }
-    const topicParents = db.prepare(`SELECT id, parent_id FROM entities WHERE kind='topic' AND parent_id IS NOT NULL AND parent_id != ''`).all();
-    for (const r of topicParents) {
-      ins.run(`ip_${r.id}_${r.parent_id}`, 'topic', r.id, 'topic', r.parent_id, now);
+    const entityCols = db.pragma('table_info(entities)').map(c => c.name);
+    if (entityCols.includes('parent_id')) {
+      const topicParents = db.prepare(`SELECT id, parent_id FROM entities WHERE kind='topic' AND parent_id IS NOT NULL AND parent_id != ''`).all();
+      for (const r of topicParents) {
+        ins.run(`ip_${r.id}_${r.parent_id}`, 'topic', r.id, 'topic', r.parent_id, now);
+      }
     }
   }
 }
@@ -377,11 +389,11 @@ db.exec(`
 // Explicit UNIQUE indexes + perf indexes. `CREATE TABLE IF NOT EXISTS` no-ops
 // on pre-existing DBs, so declarative UNIQUE constraints don't take effect —
 // these CREATE INDEX statements back-fill them and also speed up hot queries.
+// Note: ux_daily_logs_date is created after the daily_logs table below.
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS ux_collections_kind_title ON collections(kind, title COLLATE NOCASE);
   CREATE UNIQUE INDEX IF NOT EXISTS ux_scripture_canonical   ON scripture_refs(canonical COLLATE NOCASE);
   CREATE UNIQUE INDEX IF NOT EXISTS ux_people_label          ON people(label COLLATE NOCASE);
-  CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_logs_date       ON daily_logs(date);
   CREATE UNIQUE INDEX IF NOT EXISTS ux_user_indexes_title    ON user_indexes(title COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS ix_links_to                     ON links(to_type, to_id);
   CREATE INDEX IF NOT EXISTS ix_links_from                   ON links(from_type, from_id);
@@ -454,10 +466,14 @@ db.exec(`
   if (!cols.includes('content_hash'))         db.exec('ALTER TABLE reference_materials ADD COLUMN content_hash TEXT');
   if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE reference_materials ADD COLUMN links_classified_at TEXT');
 }
+// daily_logs is created later in this file; guard so fresh DBs don't error.
 {
-  const cols = db.pragma('table_info(daily_logs)').map(c => c.name);
-  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
-  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
+  const dlExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_logs'").get();
+  if (dlExists) {
+    const cols = db.pragma('table_info(daily_logs)').map(c => c.name);
+    if (!cols.includes('content_hash'))         db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
+    if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
+  }
 }
 
 // Dedupe links after a merge moves (to_type,to_id) pointers. Keeps the earliest
@@ -1100,6 +1116,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_books_author ON books(author_entity_id);
   CREATE INDEX IF NOT EXISTS idx_books_title ON books(title COLLATE NOCASE);
 `);
+// archived_at migration for books (runs here so fresh DBs get the column right after table creation).
+{
+  const cols = db.pragma('table_info(books)').map(c => c.name);
+  if (!cols.includes('archived_at')) db.exec('ALTER TABLE books ADD COLUMN archived_at TEXT');
+}
 
 // Daily logs are first-class: they are *not* a kind of collection. Pages link to a
 // daily_log via links(to_type='daily_log'); a daily_log may optionally link to one or
@@ -1113,6 +1134,7 @@ db.exec(`
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(date);
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_logs_date ON daily_logs(date);
 
   CREATE TABLE IF NOT EXISTS monthly_summaries (
     year_month TEXT PRIMARY KEY,      -- YYYY-MM
@@ -1120,6 +1142,12 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 `);
+// content_hash / links_classified_at for daily_logs — runs here after table creation.
+{
+  const cols = db.pragma('table_info(daily_logs)').map(c => c.name);
+  if (!cols.includes('content_hash'))        db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
+  if (!cols.includes('links_classified_at')) db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
+}
 
 // Phase 4 — Planning hub: rocks (weekly goals tied to a role) and habits with
 // per-day check-marks. Both are independent tables; no polymorphic links into
