@@ -1,0 +1,2618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gloss</title>
+<link rel="stylesheet" href="/fonts/foxed.css">
+<style>
+:root {
+  --paper:       #FAF7F1;
+  --paper-2:     #F3EEE3;
+  --paper-3:     #ECE4D2;
+  --paper-edge:  #E5DCC6;
+  --ink:         #1F1B16;
+  --ink-soft:    #5C5246;
+  --ink-faint:   #9D907D;
+  --rule:        #E5DCC6;
+  --rule-soft:   #EFE9DC;
+  --accent:      #8B3A1F;
+  --accent-dim:  #6F2E18;
+  --accent-soft: #E3C7BB;
+  --danger:      #7A2E22;
+  --ok:          #4C6B3F;
+
+  --font-sans:   "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono:   "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --r-sm: 2px;
+  --r:    3px;
+  --r-lg: 5px;
+  --shadow-card:  0 1px 2px rgba(0,0,0,.04);
+  --shadow-lift:  0 8px 28px rgba(31,27,22,.12), 0 2px 8px rgba(31,27,22,.06);
+  --t: 180ms ease-out;
+
+  --rail-w: 220px;
+  --detail-w: 0px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+input, textarea, select { font: inherit; color: inherit; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-dim); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+
+/* ── Shell (split-pane) ────────────────── */
+#shell { display: flex; min-height: 100vh; align-items: stretch; }
+
+#rail {
+  flex: 0 0 var(--rail-w);
+  transition: flex-basis 200ms ease-out;
+  background: var(--paper-2);
+  border-right: 1px solid var(--rule);
+  padding: 18px 14px;
+  display: flex; flex-direction: column; gap: 2px;
+  position: sticky; top: 0; align-self: flex-start;
+  height: 100vh;
+  overflow: hidden;
+}
+body.rail-collapsed { --rail-w: 58px; }
+body.rail-collapsed #rail { padding: 18px 8px; }
+
+.rail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px;
+  padding: 2px 6px;
+}
+#brand {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+  white-space: nowrap;
+  transition: opacity 160ms;
+}
+#brand .dot { color: var(--accent); }
+body.rail-collapsed #brand { opacity: 0; width: 0; overflow: hidden; }
+#rail-toggle {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r);
+  color: var(--ink-faint);
+  transition: all var(--t);
+  flex-shrink: 0;
+}
+#rail-toggle:hover { color: var(--ink); background: var(--paper-3); }
+body.rail-collapsed #rail-toggle { transform: rotate(180deg); margin: 0 auto; }
+
+.nav-btn {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0;
+  transition: color var(--t), background var(--t), border-color var(--t);
+  text-align: left;
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.nav-btn::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 2px;
+  background: transparent;
+  border-radius: 2px;
+  transition: background var(--t);
+}
+.nav-btn:hover { color: var(--ink); background: var(--paper-3); }
+.nav-btn.active { color: var(--ink); background: var(--paper); }
+.nav-btn.active::before { background: var(--accent); }
+.nav-btn .ico { width: 16px; height: 16px; opacity: 0.85; flex-shrink: 0; }
+.nav-btn.active .ico { opacity: 1; color: var(--accent); }
+.nav-btn .lbl { transition: opacity 140ms; }
+body.rail-collapsed .nav-btn { justify-content: center; padding: 8px 0; gap: 0; }
+body.rail-collapsed .nav-btn .lbl { display: none; }
+
+#rail-footer {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  padding: 8px 10px;
+  text-transform: uppercase;
+  transition: opacity 160ms;
+}
+body.rail-collapsed #rail-footer { opacity: 0; }
+
+/* Main */
+#main { flex: 1; min-width: 0; }
+#main-inner {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 44px 48px 80px;
+}
+body.has-detail #main-inner {
+  max-width: none;
+  margin: 0;
+  padding: 36px 32px 60px;
+}
+
+/* Detail pane */
+#detail {
+  flex: 0 0 var(--detail-w);
+  transition: flex-basis 220ms ease-out;
+  overflow: hidden;
+  border-left: 1px solid var(--rule);
+  background: var(--paper);
+  position: sticky; top: 0; align-self: flex-start;
+  max-height: 100vh;
+}
+body.has-detail { --detail-w: min(58vw, 900px); }
+#detail-scroll { height: 100vh; overflow-y: auto; }
+#detail-inner { padding: 20px 32px 60px; }
+
+/* ── Shared primitives ───────────────── */
+.surface-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 28px; gap: 16px; }
+.surface-title {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 30px;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  margin: 0;
+  color: var(--ink);
+}
+.surface-sub { color: var(--ink-soft); font-size: 13px; }
+.mono { font-family: var(--font-mono); }
+.faint { color: var(--ink-faint); }
+.soft  { color: var(--ink-soft); }
+.lbl-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--ink-soft);
+  transition: all var(--t);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--ink-faint); color: var(--ink); background: var(--paper); }
+.chip.accent { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent-dim); }
+.chip .x { margin-left: 2px; opacity: 0.5; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 2px; }
+.chip .x:hover { opacity: 1; color: var(--danger); background: rgba(139,58,31,0.08); }
+.chip.kind-scripture { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all var(--t);
+}
+.btn:hover { border-color: var(--ink-faint); background: var(--paper-2); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--ink-soft); }
+.btn.ghost:hover { color: var(--ink); background: var(--paper-2); }
+.btn.sm { padding: 2px 7px; font-size: 11.5px; }
+
+.icon-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r);
+  color: var(--ink-soft);
+  transition: all var(--t);
+}
+.icon-btn:hover { background: var(--paper-2); color: var(--ink); }
+
+.input, textarea.input, select.input {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  transition: border-color var(--t), box-shadow var(--t);
+  font-size: 13px;
+}
+.input:focus, textarea.input:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(31,27,22,0.08);
+}
+.input.mono { font-family: var(--font-mono); font-size: 12px; }
+
+hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
+
+.empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-faint);
+  border: 1px dashed var(--rule);
+  border-radius: var(--r);
+  font-size: 13px;
+}
+
+/* ── LOG — month spine ───────────────── */
+.log-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+.log-nav { display: flex; align-items: center; gap: 4px; color: var(--ink-soft); }
+.log-nav button { padding: 4px 10px; border-radius: var(--r); transition: all var(--t); font-size: 14px; }
+.log-nav button:hover { background: var(--paper-2); color: var(--ink); }
+.log-month-label {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  padding: 0 10px;
+  line-height: 1;
+}
+
+.spine { border-top: 1px solid var(--rule); }
+.spine-row {
+  display: grid;
+  grid-template-columns: 28px 42px 1fr auto;
+  align-items: baseline;
+  gap: 14px;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+  cursor: pointer;
+  transition: background var(--t);
+}
+.spine-row:hover { background: var(--paper-2); }
+.spine-row.today { background: linear-gradient(to right, var(--accent-soft) 0, var(--paper) 160px); }
+.spine-row.today:hover { background: linear-gradient(to right, var(--accent-soft) 0, var(--paper-2) 160px); }
+.spine-row.weekend .spine-dom, .spine-row.weekend .spine-wd { color: var(--ink-faint); }
+.spine-dom {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.spine-row.today .spine-dom { color: var(--accent); font-weight: 600; }
+.spine-wd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+.spine-sum {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink);
+  min-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.spine-sum.empty-dot { color: var(--ink-faint); font-family: var(--font-mono); font-size: 13px; }
+.spine-sum.synth { color: var(--ink-soft); }
+.spine-pc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  padding: 2px 7px;
+  background: var(--paper-2);
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.spine-row.today .spine-pc { background: var(--accent-soft); color: var(--accent-dim); }
+
+/* ── CAPTURE ─────────────────────────── */
+.cap-grid { display: flex; flex-direction: column; gap: 18px; }
+.cap-zone {
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  padding: 22px 24px;
+  background: var(--paper);
+  transition: border-color var(--t);
+}
+.cap-zone h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.cap-zone .sub { color: var(--ink-soft); font-size: 12.5px; margin-bottom: 14px; }
+
+.drop-zone {
+  border: 1.5px dashed var(--rule);
+  border-radius: var(--r);
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--ink-faint);
+  transition: all var(--t);
+  cursor: pointer;
+}
+.drop-zone:hover, .drop-zone.drag { border-color: var(--ink); background: var(--paper-2); color: var(--ink-soft); }
+.drop-zone .big { font-size: 14px; color: var(--ink-soft); font-weight: 500; }
+.drop-zone .kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--paper-2);
+}
+.seg button {
+  padding: 5px 12px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  font-weight: 500;
+  transition: all var(--t);
+  letter-spacing: 0.02em;
+}
+.seg button.active { background: var(--paper); color: var(--ink); box-shadow: inset 0 -1px 0 var(--accent); }
+.seg button:hover:not(.active) { color: var(--ink); }
+
+.ingest-stream { margin-top: 16px; border-top: 1px solid var(--rule); padding-top: 16px; }
+.ingest-progress {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+.ingest-tile {
+  display: flex;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  margin-bottom: 8px;
+  animation: fadeIn 220ms ease-out;
+  background: var(--paper);
+  cursor: pointer;
+  transition: border-color var(--t);
+}
+.ingest-tile:hover { border-color: var(--ink-faint); }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.ingest-tile img { width: 80px; height: 80px; object-fit: cover; border-radius: var(--r-sm); background: var(--paper-3); }
+.ingest-tile .meta { flex: 1; min-width: 0; }
+.ingest-tile .vp { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.02em; }
+.ingest-tile .sum { font-size: 13.5px; color: var(--ink); margin-top: 4px; line-height: 1.45; }
+
+.backlog-card {
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r);
+  padding: 14px 18px;
+  background: var(--paper);
+  margin-bottom: 12px;
+}
+.backlog-card .q { font-size: 14.5px; color: var(--ink); margin-bottom: 10px; font-weight: 500; }
+.backlog-card .ctx { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); margin-bottom: 8px; letter-spacing: 0.04em; text-transform: uppercase; }
+.backlog-actions { display: flex; gap: 8px; margin-top: 10px; }
+.radio-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+.radio-list label { display: flex; align-items: center; gap: 8px; padding: 4px; border-radius: var(--r-sm); cursor: pointer; }
+.radio-list label:hover { background: var(--paper-2); }
+
+/* ── INDEX ───────────────────────────── */
+.index-kinds { display: flex; flex-direction: column; gap: 28px; }
+.kind-block h3 {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: baseline; gap: 10px;
+  font-weight: 500;
+}
+.kind-block h3 .count { color: var(--ink-faint); font-weight: 400; }
+
+.tree-row {
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--r);
+  transition: background var(--t);
+  min-height: 32px;
+  overflow: hidden;
+}
+.tree-row:hover { background: var(--paper-2); }
+.tree-row.expanded { background: var(--paper-2); }
+.tree-chevron {
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-faint);
+  transition: transform var(--t), color var(--t);
+  cursor: pointer;
+  font-size: 10px;
+}
+.tree-chevron.open { transform: rotate(90deg); color: var(--accent); }
+.tree-label {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-label:hover { color: var(--accent); }
+.tree-label.repeat { color: var(--ink-faint); font-style: italic; }
+.tree-counts {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+.tree-row { position: relative; }
+.tree-actions {
+  position: absolute;
+  right: 4px; top: 50%;
+  transform: translateY(-50%);
+  display: flex; gap: 2px; align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t);
+  background: var(--paper-2);
+  border-radius: var(--r);
+  padding: 0 2px;
+}
+.tree-row:hover .tree-actions, .tree-row.expanded .tree-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.tree-actions .btn { padding: 2px 7px; font-size: 11px; border-color: transparent; }
+.tree-actions .btn:hover { border-color: var(--rule); }
+
+.tree-children {
+  margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1px solid var(--rule);
+}
+
+.tree-panel {
+  margin: 4px 0 12px 26px;
+  padding: 12px 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  background: var(--paper);
+  font-size: 13px;
+}
+.tree-panel .section-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  margin: 10px 0 6px;
+  font-weight: 500;
+}
+.tree-panel .section-label:first-child { margin-top: 0; }
+.tree-panel .conn-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tree-panel .meta-form { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; align-items: center; margin-top: 4px; margin-bottom: 8px; }
+.tree-panel .meta-form > label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+.tree-panel .pages-link {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all var(--t);
+}
+.tree-panel .pages-link:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Index kind tabs ─────────────────── */
+.kind-tabs {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 22px;
+}
+.kind-tab {
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--t), border-color var(--t);
+  font-weight: 500;
+}
+.kind-tab:hover { color: var(--ink-soft); }
+.kind-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+.kind-tab .tab-count { margin-left: 5px; opacity: 0.6; font-size: 9.5px; }
+
+/* ── Detail pane ─────────────────────── */
+.detail-head {
+  position: sticky; top: 0;
+  padding: 14px 28px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center; justify-content: space-between;
+  z-index: 2;
+}
+.detail-head .title {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.detail-head .sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; letter-spacing: 0.04em; }
+
+.scan-frame {
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--paper-3);
+  position: relative;
+  box-shadow: var(--shadow-card);
+  max-width: 100%;
+}
+.scan-frame img { display: block; width: 100%; height: auto; cursor: zoom-in; transition: transform var(--t); }
+.scan-frame .rot-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(250, 247, 241, 0.9);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  backdrop-filter: blur(6px);
+  letter-spacing: 0.02em;
+}
+.scan-frame .rot-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.voice-frame {
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  padding: 14px 18px;
+  background: var(--paper-2);
+  font-size: 13.5px;
+  color: var(--ink);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.voice-frame .voice-lbl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
+}
+
+.meta-row {
+  display: flex; align-items: center; gap: 18px;
+  margin: 16px 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+  letter-spacing: 0.02em;
+}
+.meta-row .k { color: var(--ink-faint); margin-right: 5px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
+.meta-row .editable { cursor: pointer; border-bottom: 1px dotted var(--ink-faint); padding: 0 2px; transition: color var(--t), border-color var(--t); }
+.meta-row .editable:hover { color: var(--accent); border-color: var(--accent); }
+
+.editable-text {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  cursor: text;
+  min-height: 32px;
+  transition: border-color var(--t), background var(--t);
+  line-height: 1.55;
+}
+.editable-text:hover { border-color: var(--rule); background: var(--paper-2); }
+.editable-text.editing { border-color: var(--ink); background: var(--paper); }
+.editable-text.summary { font-size: 14.5px; color: var(--ink); }
+
+.links-section { margin-top: 26px; }
+.links-group { margin-bottom: 14px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.links-group-lbl {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  font-weight: 500;
+  min-width: 80px;
+  padding-top: 4px;
+}
+.links-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
+
+.day-tile {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  margin-bottom: 10px;
+  background: var(--paper);
+  transition: all var(--t);
+  cursor: pointer;
+}
+.day-tile:hover { border-color: var(--ink-faint); box-shadow: var(--shadow-card); }
+.day-tile .thumb {
+  width: 100px; height: 100px;
+  background: var(--paper-3);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  border: 1px solid var(--rule);
+}
+.day-tile .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.day-tile .thumb.voice {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+  font-size: 18px;
+}
+.day-tile .tile-body { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
+.day-tile .captions { font-size: 13.5px; color: var(--ink); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.day-tile .tile-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; letter-spacing: 0.02em; }
+.ctx-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.ctx-badge { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.ctx-badge.voice { background: color-mix(in srgb, var(--ink-soft) 12%, transparent); color: var(--ink-soft); }
+.ctx-badge.date { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); cursor: pointer; }
+.ctx-badge.date:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.ctx-badge.coll { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-soft); }
+.ctx-badge.artifact { background: color-mix(in srgb, var(--ok, #5C7A4D) 12%, transparent); color: var(--ok, #5C7A4D); }
+.ctx-badge.reference { background: color-mix(in srgb, var(--ink-soft) 15%, transparent); color: var(--ink-soft); }
+
+/* ── Typeahead popover ──────────────── */
+.typeahead-pop {
+  position: fixed;
+  z-index: 100;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lift);
+  width: 340px;
+  max-height: 380px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.typeahead-pop input { border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; padding: 10px 12px; font-size: 13px; }
+.typeahead-pop input:focus { box-shadow: none; border-color: transparent; border-bottom-color: var(--rule); }
+.typeahead-list { overflow-y: auto; max-height: 300px; }
+.typeahead-row {
+  padding: 7px 12px;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.typeahead-row:last-child { border-bottom: 0; }
+.typeahead-row:hover, .typeahead-row.active { background: var(--paper-2); }
+.typeahead-row .kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-left: auto;
+}
+
+/* ── Lightbox (scan zoom) ───────────── */
+#lightbox {
+  position: fixed; inset: 0;
+  background: rgba(15, 12, 9, 0.92);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+#lightbox.open { display: flex; animation: fadeIn 180ms; }
+#lightbox img {
+  max-width: 96vw;
+  max-height: 96vh;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  transition: transform 240ms ease-out;
+  cursor: zoom-in;
+  user-select: none;
+}
+#lightbox.zoomed img { cursor: grab; max-width: none; max-height: none; }
+#lightbox .lb-close {
+  position: fixed; top: 16px; right: 16px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  backdrop-filter: blur(4px);
+}
+#lightbox .lb-close:hover { background: rgba(255,255,255,0.2); }
+#lightbox .lb-hint {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(255,255,255,0.6);
+  letter-spacing: 0.05em;
+}
+
+/* ── Toast ────────────────────────────── */
+#toast-stack {
+  position: fixed; bottom: 20px; right: 20px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 300;
+}
+.toast {
+  padding: 9px 14px;
+  border-radius: var(--r);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12.5px;
+  box-shadow: var(--shadow-lift);
+  animation: slideIn 180ms ease-out;
+  letter-spacing: 0.01em;
+}
+.toast.err { background: var(--danger); }
+.toast.ok  { background: var(--ok); }
+@keyframes slideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+
+/* ── Cmd+K palette ───────────────────── */
+#cmdk { position: fixed; inset: 0; z-index: 400; display: none; align-items: flex-start; justify-content: center; padding-top: 14vh; }
+#cmdk.open { display: flex; }
+#cmdk-backdrop { position: absolute; inset: 0; background: rgba(15,12,9,0.55); cursor: default; }
+#cmdk-panel {
+  position: relative;
+  width: min(640px, 92vw);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lift);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: fadeIn 140ms ease-out;
+}
+#cmdk-input-wrap {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+#cmdk-icon { flex-shrink: 0; color: var(--ink-faint); }
+#cmdk-input {
+  flex: 1;
+  border: 0; background: transparent; outline: none;
+  font-size: 15px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+#cmdk-input::placeholder { color: var(--ink-faint); }
+#cmdk-esc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  color: var(--ink-faint);
+  letter-spacing: 0.05em;
+}
+#cmdk-list { max-height: 400px; overflow-y: auto; }
+.cmdk-section {
+  padding: 6px 0 2px;
+}
+.cmdk-section-lbl {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  padding: 4px 14px;
+  font-weight: 500;
+}
+.cmdk-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background var(--t);
+}
+.cmdk-row:hover, .cmdk-row.active { background: var(--paper-2); }
+.cmdk-row .cmdk-lbl { flex: 1; font-size: 13.5px; color: var(--ink); font-weight: 500; }
+.cmdk-row .cmdk-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: 0.02em; }
+.cmdk-row .cmdk-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+}
+.cmdk-row.active .cmdk-kind { background: var(--paper-3); }
+.cmdk-empty {
+  padding: 28px 14px;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+#cmdk-footer {
+  border-top: 1px solid var(--rule);
+  padding: 8px 14px;
+  display: flex; gap: 16px;
+  background: var(--paper-2);
+}
+.cmdk-hint { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); display: flex; align-items: center; gap: 4px; }
+.cmdk-hint kbd {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: 9.5px;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 999px; border: 2px solid var(--paper); }
+*::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }
+
+/* ── Responsive ──────────────────────── */
+@media (max-width: 880px) {
+  body { --rail-w: 58px; }
+  body.rail-collapsed { --rail-w: 58px; }
+  body:not(.rail-collapsed) #brand { opacity: 0; width: 0; }
+  body:not(.rail-collapsed) .nav-btn { justify-content: center; padding: 8px 0; gap: 0; }
+  body:not(.rail-collapsed) .nav-btn .lbl { display: none; }
+  body:not(.rail-collapsed) #rail-footer { opacity: 0; }
+  body.has-detail #main { display: none; }
+  body.has-detail { --detail-w: calc(100vw - 58px); }
+}
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <nav id="rail">
+    <div class="rail-head">
+      <h1 id="brand">Gloss<span class="dot">.</span></h1>
+      <button id="rail-toggle" title="Collapse sidebar">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+    </div>
+    <button class="nav-btn" data-nav="capture" title="Capture">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <span class="lbl">Capture</span>
+    </button>
+    <button class="nav-btn" data-nav="log" title="Log">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span class="lbl">Log</span>
+    </button>
+    <button class="nav-btn" data-nav="index" title="Index">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span class="lbl">Index</span>
+    </button>
+    <div id="rail-footer">notebook · v1</div>
+  </nav>
+
+  <main id="main"><div id="main-inner"></div></main>
+
+  <section id="detail" aria-hidden="true">
+    <div id="detail-scroll"><div id="detail-inner"></div></div>
+  </section>
+</div>
+
+<div id="cmdk" role="dialog" aria-modal="true" aria-label="Search">
+  <div id="cmdk-backdrop"></div>
+  <div id="cmdk-panel">
+    <div id="cmdk-input-wrap">
+      <svg id="cmdk-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="cmdk-input" placeholder="Search index, people, dates…" autocomplete="off" spellcheck="false">
+      <kbd id="cmdk-esc">esc</kbd>
+    </div>
+    <div id="cmdk-list"></div>
+    <div id="cmdk-footer">
+      <span class="cmdk-hint"><kbd>↑↓</kbd> navigate</span>
+      <span class="cmdk-hint"><kbd>↵</kbd> open</span>
+      <span class="cmdk-hint"><kbd>esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<div id="lightbox">
+  <button class="lb-close" title="Close (Esc)">×</button>
+  <img alt="">
+  <div class="lb-hint">click to toggle zoom · esc to close</div>
+</div>
+
+<div id="toast-stack"></div>
+
+<script type="module">
+// ─── util ──────────────────────────────────
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) {
+    for (const k of Object.keys(attrs)) {
+      const v = attrs[k];
+      if (v == null || v === false) continue;
+      if (k === 'class' || k === 'className') el.className = v;
+      else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+      else if (k === 'html') el.innerHTML = v;
+      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === 'dataset') Object.assign(el.dataset, v);
+      else if (k in el && typeof el[k] !== 'object') el[k] = v;
+      else el.setAttribute(k, v);
+    }
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.appendChild(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const mainInner = document.getElementById('main-inner');
+const detail = document.getElementById('detail');
+const detailInner = document.getElementById('detail-inner');
+const detailScroll = document.getElementById('detail-scroll');
+
+function toast(msg, kind = '') {
+  const t = h('div', { class: `toast ${kind}` }, msg);
+  document.getElementById('toast-stack').appendChild(t);
+  setTimeout(() => {
+    t.style.transition = 'opacity 180ms';
+    t.style.opacity = '0';
+    setTimeout(() => t.remove(), 200);
+  }, 2600);
+}
+
+function todayIso() { return new Date().toISOString().slice(0, 10); }
+function ymNow() { return todayIso().slice(0, 7); }
+function ymShift(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function monthLabel(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+}
+function dateLabel(iso) {
+  return new Date(iso + 'T00:00:00').toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+// ─── api ────────────────────────────────────
+async function api(path, method = 'GET', body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let msg; try { const j = await res.json(); msg = j.detail ? `${j.error}: ${j.detail}` : j.error; } catch {}
+    throw new Error(msg || `${res.status} ${res.statusText}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+async function* ndjson(response) {
+  const reader = response.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try { yield JSON.parse(line); } catch {}
+    }
+  }
+  if (buf.trim()) { try { yield JSON.parse(buf); } catch {} }
+}
+
+// ─── Sidebar toggle ─────────────────────────
+const railToggle = document.getElementById('rail-toggle');
+function applyRailState() {
+  const collapsed = localStorage.getItem('gloss.railCollapsed') === '1';
+  document.body.classList.toggle('rail-collapsed', collapsed);
+}
+railToggle.addEventListener('click', () => {
+  const next = !document.body.classList.contains('rail-collapsed');
+  localStorage.setItem('gloss.railCollapsed', next ? '1' : '0');
+  applyRailState();
+});
+applyRailState();
+
+// ─── Router ─────────────────────────────────
+const routes = { capture: renderCapture, log: renderLog, index: renderIndex };
+let currentLeftHash = '#/log';
+
+function parseHash() {
+  const raw = location.hash || '#/log';
+  const body = raw.replace(/^#\//, '');
+  const parts = body.split('/').filter(Boolean);
+  return { nav: parts[0] || 'log', args: parts.slice(1) };
+}
+
+async function route() {
+  const { nav, args } = parseHash();
+  if (nav === 'page') {
+    const id = args[0];
+    if (id) await openPageDetail(id);
+    return;
+  }
+  if (nav === 'day') {
+    const id = args[0];
+    if (id) await openDayDetail(id);
+    return;
+  }
+  closeDetail(true);
+  currentLeftHash = location.hash;
+  for (const btn of document.querySelectorAll('.nav-btn')) {
+    btn.classList.toggle('active', btn.dataset.nav === nav);
+  }
+  const view = routes[nav] || routes.log;
+  mainInner.innerHTML = '';
+  window.scrollTo(0, 0);
+  try { await view(...args); }
+  catch (err) { mainInner.appendChild(h('div', { class: 'empty' }, `Couldn't load: ${err.message}`)); }
+}
+
+function navigate(nav, ...args) {
+  location.hash = '#/' + [nav, ...args].filter(x => x !== '').join('/');
+}
+
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const n = btn.dataset.nav;
+    navigate(n, n === 'log' ? ymNow() : '');
+  });
+});
+window.addEventListener('hashchange', route);
+
+// ─── Detail pane open/close ─────────────────
+function openDetail() {
+  document.body.classList.add('has-detail');
+  detail.setAttribute('aria-hidden', 'false');
+  detailScroll.scrollTop = 0;
+}
+function closeDetail(silent = false) {
+  document.body.classList.remove('has-detail');
+  detail.setAttribute('aria-hidden', 'true');
+  if (!silent && (location.hash.startsWith('#/page') || location.hash.startsWith('#/day'))) {
+    history.replaceState(null, '', currentLeftHash || '#/log');
+  }
+  detailInner.innerHTML = '';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const lb = document.getElementById('lightbox');
+    if (lb.classList.contains('open')) { closeLightbox(); return; }
+    if (document.body.classList.contains('has-detail')) closeDetail();
+  }
+});
+
+// ─── Lightbox ──────────────────────────────
+const lb = document.getElementById('lightbox');
+const lbImg = lb.querySelector('img');
+function openLightbox(src, rotation = 0) {
+  lbImg.src = src;
+  lbImg.style.transform = `rotate(${rotation}deg)`;
+  lb.classList.add('open');
+  lb.classList.remove('zoomed');
+}
+function closeLightbox() { lb.classList.remove('open'); lb.classList.remove('zoomed'); lbImg.src = ''; }
+lb.addEventListener('click', (e) => {
+  if (e.target === lb || e.target.classList.contains('lb-close')) { closeLightbox(); return; }
+  if (e.target === lbImg) {
+    const zoomed = lb.classList.toggle('zoomed');
+    lbImg.style.transform = (zoomed ? 'scale(1.8) ' : '') + `rotate(${lbImg.dataset.rotation || 0}deg)`;
+  }
+});
+
+// ─── Editable helpers ──────────────────────
+function editableField({ value, className = 'editable-text', placeholder = 'Click to edit…', multiline = true, onSave }) {
+  const el = h(multiline ? 'div' : 'span', { class: className });
+  const render = (v) => {
+    el.classList.remove('editing');
+    el.textContent = v || '';
+    if (!v) { el.classList.add('faint'); el.textContent = placeholder; }
+    else { el.classList.remove('faint'); }
+  };
+  render(value);
+  el.addEventListener('click', () => {
+    if (el.classList.contains('editing')) return;
+    el.classList.add('editing');
+    el.classList.remove('faint');
+    const start = (el.textContent === placeholder) ? '' : (value || el.textContent || '');
+    const input = multiline
+      ? h('textarea', { class: 'input', rows: 3, value: start })
+      : h('input', { class: 'input', value: start });
+    el.replaceChildren(input);
+    input.focus();
+    input.select?.();
+    const finish = async (commit) => {
+      const next = input.value.trim();
+      if (commit && next !== (value || '').trim()) {
+        try { await onSave(next); value = next; render(next); toast('saved', 'ok'); }
+        catch (err) { toast(err.message, 'err'); render(value); }
+      } else { render(value); }
+    };
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); input.value = value || ''; finish(false); }
+      if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey)) { e.preventDefault(); finish(true); }
+    });
+  });
+  return el;
+}
+
+function inlineInput({ value, onSave, placeholder = '—', mono = false, size = 6 }) {
+  const cls = 'editable' + (mono ? ' mono' : '');
+  const wrap = h('span', { class: cls, title: 'Click to edit' }, value || placeholder);
+  wrap.addEventListener('click', () => {
+    const input = h('input', { class: 'input' + (mono ? ' mono' : ''), value: value || '', style: { width: `${Math.max(size, (value || '').length + 2)}ch`, padding: '1px 5px', fontSize: '11.5px' } });
+    wrap.replaceChildren(input);
+    input.focus(); input.select();
+    const finish = async (commit) => {
+      const next = input.value.trim();
+      if (commit && next !== (value || '')) {
+        try { await onSave(next); value = next; wrap.textContent = next || placeholder; toast('saved', 'ok'); }
+        catch (err) { toast(err.message, 'err'); wrap.textContent = value || placeholder; }
+      } else { wrap.textContent = value || placeholder; }
+    };
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') finish(false);
+      if (e.key === 'Enter') finish(true);
+    });
+  });
+  return wrap;
+}
+
+// ─── Typeahead ─────────────────────────────
+function openTypeahead({ anchor, kinds = null, onPick, placeholder = 'Search…' }) {
+  const rect = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : { left: 200, top: 200, bottom: 220 };
+  const pop = h('div', { class: 'typeahead-pop' });
+  const input = h('input', { class: 'input', placeholder });
+  const list = h('div', { class: 'typeahead-list' });
+  pop.append(input, list);
+  document.body.appendChild(pop);
+  // position relative to viewport (fixed)
+  const top = Math.min(rect.bottom + 4, window.innerHeight - 400);
+  const left = Math.min(rect.left, window.innerWidth - 360);
+  Object.assign(pop.style, { top: `${top}px`, left: `${left}px` });
+  input.focus();
+  let active = 0;
+  let rows = [];
+  let timer = null;
+  const close = () => { pop.remove(); document.removeEventListener('mousedown', away); };
+  const away = (e) => { if (!pop.contains(e.target) && e.target !== anchor) close(); };
+  setTimeout(() => document.addEventListener('mousedown', away), 0);
+
+  async function query(q) {
+    list.innerHTML = '';
+    if (!q || q.length < 1) return;
+    const safe = q.replace(/['"*]/g, ' ').trim();
+    try {
+      const res = await api(`/api/index/search?q=${encodeURIComponent(safe)}`);
+      const items = res.results || [];
+      const filtered = kinds ? items.filter(r => kinds.includes(r.kind)) : items;
+      rows = filtered.slice(0, 12);
+      active = 0;
+      renderList();
+    } catch {}
+  }
+  function renderList() {
+    list.innerHTML = '';
+    rows.forEach((r, i) => {
+      const row = h('div', { class: 'typeahead-row' + (i === active ? ' active' : '') },
+        h('span', null, r.label),
+        h('span', { class: 'kind' }, r.kind.replace('_', ' ')),
+      );
+      row.addEventListener('click', () => { onPick(r); close(); });
+      list.appendChild(row);
+    });
+    if (!rows.length) list.appendChild(h('div', { class: 'typeahead-row faint', style: { cursor: 'default' } }, 'No matches.'));
+  }
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => query(input.value), 140); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, rows.length - 1); renderList(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); renderList(); }
+    else if (e.key === 'Enter') { if (rows[active]) { onPick(rows[active]); close(); } }
+  });
+}
+
+// ─── LOG ───────────────────────────────────
+async function renderLog(ym) {
+  const month = (ym && /^\d{4}-\d{2}$/.test(ym)) ? ym : ymNow();
+  if (!ym || ym !== month) history.replaceState(null, '', `#/log/${month}`);
+
+  mainInner.appendChild(h('div', { class: 'log-head' },
+    h('h1', { class: 'surface-title' }, 'Log'),
+    h('div', { class: 'log-nav' },
+      h('button', { onclick: () => navigate('log', ymShift(month, -1)), title: 'Previous month' }, '←'),
+      h('span', { class: 'log-month-label' }, monthLabel(month)),
+      h('button', { onclick: () => navigate('log', ymShift(month, +1)), title: 'Next month' }, '→'),
+      h('button', { onclick: () => navigate('log', ymNow()), class: 'mono', style: { marginLeft: '12px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase' } }, 'today'),
+    ),
+  ));
+
+  const spine = h('div', { class: 'spine' });
+  mainInner.appendChild(spine);
+  const res = await api(`/api/logs/month/${month}`);
+  const today = todayIso();
+  for (const d of res.days) {
+    const isToday = d.date === today;
+    const wd = (d.weekday || '').toLowerCase();
+    const isWeekend = wd === 'sat' || wd === 'sun';
+    const text = d.summary || d.preview;
+    const sumEl = text
+      ? h('div', { class: 'spine-sum' + (d.preview_is_synthesized ? ' synth' : '') }, text)
+      : h('div', { class: 'spine-sum empty-dot' }, '·');
+    const row = h('div', { class: `spine-row${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}` },
+      h('div', { class: 'spine-dom' }, String(d.dom)),
+      h('div', { class: 'spine-wd' }, wd),
+      sumEl,
+      d.page_count > 0 ? h('div', { class: 'spine-pc' }, String(d.page_count)) : h('div'),
+    );
+    row.addEventListener('click', () => openDayByDate(d));
+    spine.appendChild(row);
+  }
+}
+
+async function openDayByDate(d) {
+  if (d.daily_log_id) navigate('day', d.daily_log_id);
+  else openBlankDay(d.date);
+}
+
+function openBlankDay(date) {
+  detailInner.innerHTML = '';
+  detailInner.append(
+    h('div', { class: 'detail-head' },
+      h('div', null,
+        h('div', { class: 'title' }, dateLabel(date)),
+        h('div', { class: 'sub' }, date),
+      ),
+      h('button', { class: 'icon-btn', onclick: () => closeDetail() }, '×'),
+    ),
+    h('div', { style: { padding: '20px 4px' } },
+      h('p', { class: 'soft' }, 'No entries yet. Add a summary to create it.'),
+      editableField({
+        value: '',
+        className: 'editable-text summary',
+        placeholder: 'Write a short summary of the day…',
+        onSave: async (v) => {
+          if (!v) return;
+          const created = await api(`/api/daily-logs/${date}?create=1`, 'POST', { summary: v });
+          navigate('day', created.id || date);
+        },
+      }),
+    ),
+  );
+  openDetail();
+}
+
+async function openDayDetail(id) {
+  detailInner.innerHTML = '';
+  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  openDetail();
+
+  const raw = await api(`/api/daily-logs/${id}`);
+  const dl = raw.daily_log || raw;
+  const date = dl.date;
+  const ents = Array.isArray(raw.entities) ? raw.entities : [];
+  const byKind = {
+    person: ents.filter(e => e.kind === 'person'),
+    topic: ents.filter(e => e.kind === 'topic'),
+    scripture: ents.filter(e => e.kind === 'scripture'),
+    book: ents.filter(e => e.kind === 'book'),
+  };
+  const collections = raw.collections || [];
+  const pages = raw.pages || [];
+
+  const groups = new Map();
+  for (const p of pages) {
+    const key = p.scan_path || `p:${p.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+
+  detailInner.innerHTML = '';
+  detailInner.append(
+    h('div', { class: 'detail-head' },
+      h('div', null,
+        h('div', { class: 'title' }, dateLabel(date)),
+        h('div', { class: 'sub' }, date),
+      ),
+      h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
+    ),
+  );
+
+  const body = h('div', { style: { padding: '20px 4px' } });
+
+  body.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '6px' } }, 'Summary'));
+  body.appendChild(editableField({
+    value: dl.summary || '',
+    className: 'editable-text summary',
+    placeholder: 'Write a short summary of the day…',
+    onSave: async (v) => { await api(`/api/daily-logs/${id}`, 'PATCH', { summary: v }); },
+  }));
+
+  body.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '24px', marginBottom: '10px' } }, `Pages (${pages.length})`));
+  if (!pages.length) {
+    body.appendChild(h('div', { class: 'empty' }, 'No pages on this day.'));
+  } else {
+    for (const [scanPath, group] of groups) {
+      const first = group[0];
+      const isVoice = first.source_kind === 'voice_memo' || (first.scan_path || '').startsWith('voice:');
+      const thumb = isVoice
+        ? h('div', { class: 'thumb voice' }, '♪')
+        : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy' }));
+      const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
+      const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
+      const tile = h('div', { class: 'day-tile' },
+        thumb,
+        h('div', { class: 'tile-body' },
+          h('div', { class: 'captions' }, caps),
+          h('div', { class: 'tile-meta' }, `${group.length} page${group.length > 1 ? 's' : ''}${isVoice ? ' · voice' : ''}${meta ? ' · ' + meta : ''}`),
+        ),
+      );
+      tile.addEventListener('click', () => {
+        detailBackContext = { label: dateLabel(date), action: () => openDayDetail(id) };
+        openPageDetail(first.id);
+      });
+      body.appendChild(tile);
+    }
+  }
+
+  const sectionHost = h('div', { class: 'links-section' });
+  let hasLinks = false;
+  const linkGroups = [
+    [collections, 'Collections', 'collection', 'title'],
+    [byKind.scripture, 'Scripture', 'scripture', 'label'],
+    [byKind.person, 'People', 'person', 'label'],
+    [byKind.topic, 'Topics', 'topic', 'label'],
+    [byKind.book, 'Books', 'book', 'label'],
+  ];
+  for (const [items, label, kind, textKey] of linkGroups) {
+    if (!items?.length) continue;
+    hasLinks = true;
+    const row = h('div', { class: 'links-group' },
+      h('div', { class: 'links-group-lbl' }, label),
+      h('div', { class: 'links-row' },
+        ...items.map(it => makeChip(it, kind, textKey)),
+      ),
+    );
+    sectionHost.appendChild(row);
+  }
+  if (hasLinks) body.appendChild(sectionHost);
+
+  detailInner.appendChild(body);
+}
+
+function makeChip(it, kind, textKey = 'label') {
+  const text = it[textKey] || it.label || it.title || it.canonical || it.date || '(untitled)';
+  const chip = h('span', { class: `chip kind-${kind}` }, text);
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (kind === 'daily_log') navigate('day', it.id);
+    else jumpToIndexNode(kind, it.id);
+  });
+  return chip;
+}
+
+// ─── PAGE detail ──────────────────────────
+async function openPageDetail(id) {
+  detailInner.innerHTML = '';
+  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  openDetail();
+  const raw = await api(`/api/pages/${id}/detail`);
+  renderPageDetail(unpackPageDetail(raw));
+}
+
+function unpackPageDetail(raw) {
+  const p = { ...(raw.page || {}) };
+  p._raw = raw;
+  p.linked_people = raw.people || [];
+  p.linked_topics = raw.topics || [];
+  p.linked_collections = raw.collections || [];
+  p.linked_scripture = raw.scripture || [];
+  p.linked_books = raw.books || [];
+  p.linked_artifacts = raw.artifacts || [];
+  p.linked_references = raw.references || [];
+  p.linked_daily_logs = raw.daily_logs || [];
+  p.daily_log_date = raw.daily_logs?.[0]?.date || null;
+  return p;
+}
+
+// back-navigation context for page detail
+let detailBackContext = null; // { label, action }
+
+function renderPageDetail(p) {
+  detailInner.innerHTML = '';
+  const title = p.volume && p.page_number ? `Vol ${p.volume} · p.${p.page_number}` : (p.source_kind === 'voice_memo' ? 'Voice memo' : 'Page');
+
+  const headLeft = h('div', null,
+    detailBackContext ? h('button', {
+      class: 'btn ghost sm',
+      style: { marginBottom: '6px', padding: '2px 0', fontSize: '11px', letterSpacing: '0.04em' },
+      onclick: () => { const ctx = detailBackContext; detailBackContext = null; ctx.action(); },
+    }, `← ${detailBackContext.label}`) : null,
+    h('div', { class: 'title' }, title),
+    h('div', { class: 'sub' }, p.captured_at ? new Date(p.captured_at).toLocaleString() : ''),
+  );
+  detailInner.append(
+    h('div', { class: 'detail-head' },
+      headLeft,
+      h('button', { class: 'icon-btn', onclick: () => { detailBackContext = null; closeDetail(); }, title: 'Close' }, '×'),
+    ),
+  );
+
+  const body = h('div', { style: { padding: '20px 4px' } });
+  const isVoice = p.source_kind === 'voice_memo' || (p.scan_path || '').startsWith('voice:');
+
+  if (isVoice) {
+    if (p.summary) {
+      body.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '6px' } }, 'Summary'));
+      body.appendChild(editableField({
+        value: p.summary || '',
+        className: 'editable-text summary',
+        placeholder: 'Summary…',
+        onSave: async (v) => { await api(`/api/pages/${p.id}`, 'PATCH', { summary: v }); },
+      }));
+    }
+    body.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '20px', marginBottom: '6px' } }, 'Transcript'));
+    const transcriptBox = h('div', { class: 'voice-frame soft' }, 'Loading transcript…');
+    body.appendChild(transcriptBox);
+    api(`/api/pages/${p.id}/transcript`).then(t => {
+      const text = (t && (t.transcript || t.text)) || p.raw_ocr_text || '';
+      transcriptBox.classList.remove('soft');
+      transcriptBox.textContent = text || '(no transcript available)';
+    }).catch(() => {
+      const text = p.raw_ocr_text || '';
+      transcriptBox.classList.remove('soft');
+      transcriptBox.textContent = text || '(no transcript available)';
+    });
+  } else {
+    const rotation = p.rotation || 0;
+    const img = h('img', {
+      src: `/api/pages/${p.id}/scan`,
+      alt: '',
+      style: { transform: `rotate(${rotation}deg)`, transformOrigin: 'center center' },
+    });
+    img.dataset.rotation = rotation;
+    img.addEventListener('click', () => openLightbox(`/api/pages/${p.id}/scan`, p.rotation || 0));
+    const frame = h('div', { class: 'scan-frame' },
+      img,
+      h('button', {
+        class: 'rot-btn',
+        onclick: async (e) => {
+          e.stopPropagation();
+          try {
+            const res = await api(`/api/pages/${p.id}/rotate?dir=cw`, 'POST');
+            const newRot = (res && typeof res.rotation === 'number') ? res.rotation : ((rotation + 90) % 360);
+            p.rotation = newRot;
+            img.style.transform = `rotate(${newRot}deg)`;
+            img.dataset.rotation = newRot;
+          } catch (e) { toast(e.message, 'err'); }
+        },
+      }, '⟳ rotate'),
+    );
+    body.appendChild(frame);
+  }
+
+  const metaRow = h('div', { class: 'meta-row' });
+  const isNotebookScan = !isVoice && p.source_kind !== 'artifact' && p.source_kind !== 'reference';
+  if (isNotebookScan) {
+    metaRow.append(
+      h('span', null, h('span', { class: 'k' }, 'vol'),
+        inlineInput({
+          value: p.volume || '', mono: true,
+          onSave: async (v) => { await api(`/api/pages/${p.id}`, 'PATCH', { volume: v || null }); p.volume = v || null; },
+        }),
+      ),
+      h('span', null, h('span', { class: 'k' }, 'p.'),
+        inlineInput({
+          value: p.page_number ? String(p.page_number) : '', mono: true,
+          onSave: async (v) => { const n = v ? Number(v) : null; await api(`/api/pages/${p.id}`, 'PATCH', { page_number: n }); p.page_number = n; },
+        }),
+      ),
+    );
+  }
+  if (p.daily_log_date) {
+    const dayChip = h('span', null, h('span', { class: 'k' }, 'day'),
+      h('span', { class: 'editable', style: { cursor: 'pointer' }, onclick: () => { if (p.linked_daily_logs?.[0]) navigate('day', p.linked_daily_logs[0].id); } }, p.daily_log_date),
+    );
+    metaRow.appendChild(dayChip);
+  }
+  if (metaRow.children.length) body.appendChild(metaRow);
+
+  if (!isVoice) {
+    body.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '6px', marginBottom: '4px' } }, 'Summary'));
+    body.appendChild(editableField({
+      value: p.summary || '',
+      className: 'editable-text summary',
+      placeholder: 'Summary…',
+      onSave: async (v) => { await api(`/api/pages/${p.id}`, 'PATCH', { summary: v }); p.summary = v; },
+    }));
+  }
+
+  const linkGroups = [
+    ['linked_collections', 'Collections', 'collection', 'title'],
+    ['linked_scripture', 'Scripture', 'scripture', 'label'],
+    ['linked_people', 'People', 'person', 'label'],
+    ['linked_topics', 'Topics', 'topic', 'label'],
+    ['linked_books', 'Books', 'book', 'title'],
+    ['linked_artifacts', 'Artifacts', 'artifact', 'title'],
+    ['linked_references', 'References', 'reference', 'title'],
+  ];
+  const section = h('div', { class: 'links-section' });
+  section.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '10px' } }, 'Linked'));
+
+  let hasAny = false;
+  for (const [key, label, chipKind, textKey] of linkGroups) {
+    const items = p[key] || [];
+    if (!items.length) continue;
+    hasAny = true;
+    const row = h('div', { class: 'links-group' });
+    row.appendChild(h('div', { class: 'links-group-lbl' }, label));
+    const chipRow = h('div', { class: 'links-row' });
+    for (const it of items) {
+      const chip = makeChip(it, chipKind, textKey);
+      if (it.link_id) {
+        const x = h('button', { class: 'x', title: 'Remove link' }, '×');
+        x.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try { await api(`/api/links/${it.link_id}`, 'DELETE'); chip.remove(); toast('unlinked', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        chip.appendChild(x);
+      }
+      chipRow.appendChild(chip);
+    }
+    row.appendChild(chipRow);
+    section.appendChild(row);
+  }
+  if (!hasAny) section.appendChild(h('div', { class: 'soft', style: { fontSize: '12.5px', marginLeft: '80px' } }, 'No links yet.'));
+
+  const addBtn = h('button', { class: 'btn sm', style: { marginTop: '12px', marginLeft: '92px' } }, '+ link');
+  addBtn.addEventListener('click', () => {
+    openTypeahead({
+      anchor: addBtn,
+      onPick: async (r) => {
+        const toTypeMap = { person: 'person', topic: 'topic', collection: 'collection', book: 'book', scripture: 'scripture', artifact: 'artifact', reference: 'reference' };
+        const to_type = toTypeMap[r.kind];
+        if (!to_type) { toast(`Can't link to ${r.kind}`, 'err'); return; }
+        try {
+          await api('/api/links', 'POST', { from_type: 'page', from_id: p.id, to_type, to_id: r.id });
+          toast('linked', 'ok');
+          const fresh = await api(`/api/pages/${p.id}/detail`);
+          renderPageDetail(unpackPageDetail(fresh));
+        } catch (err) { toast(err.message, 'err'); }
+      },
+    });
+  });
+  section.appendChild(addBtn);
+  body.appendChild(section);
+  detailInner.appendChild(body);
+}
+
+// ─── CAPTURE ──────────────────────────────
+let backlogState = { queue: [], idx: 0, container: null };
+
+async function renderCapture() {
+  mainInner.appendChild(h('div', { class: 'surface-head' },
+    h('h1', { class: 'surface-title' }, 'Capture'),
+    h('div', { class: 'surface-sub' }, 'Scans, URLs, files, voice memos.'),
+  ));
+  const grid = h('div', { class: 'cap-grid' });
+  mainInner.appendChild(grid);
+
+  // Scan
+  const scanZone = h('div', { class: 'cap-zone' });
+  scanZone.appendChild(h('h3', null, 'Scan'));
+  scanZone.appendChild(h('div', { class: 'sub' }, 'Drag a notebook image or PDF. Multi-page PDFs stream in as they parse.'));
+  const fileInput = h('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
+  const drop = h('div', { class: 'drop-zone' },
+    h('div', { class: 'big' }, 'Drop a scan here'),
+    h('div', { style: { marginTop: '6px', fontSize: '12px' } }, 'or ', h('span', { class: 'kbd' }, 'click'), ' to choose'),
+  );
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+  drop.addEventListener('drop', async e => {
+    e.preventDefault(); drop.classList.remove('drag');
+    const f = e.dataTransfer.files?.[0];
+    if (f) startScanIngest(f, kindSeg.value, streamHost);
+  });
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (f) startScanIngest(f, kindSeg.value, streamHost);
+  });
+  scanZone.append(drop, fileInput);
+
+  const kinds = ['page', 'book', 'artifact', 'reference'];
+  const kindSeg = { value: 'page' };
+  const seg = h('div', { class: 'seg', style: { marginTop: '12px' } });
+  kinds.forEach(k => {
+    const b = h('button', { class: k === 'page' ? 'active' : '' }, k);
+    b.addEventListener('click', () => {
+      seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      kindSeg.value = k;
+    });
+    seg.appendChild(b);
+  });
+  scanZone.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '14px', marginBottom: '4px' } }, 'Hint'));
+  scanZone.appendChild(seg);
+  const streamHost = h('div');
+  scanZone.appendChild(streamHost);
+  grid.appendChild(scanZone);
+
+  // URL or file
+  const urlZone = h('div', { class: 'cap-zone' });
+  urlZone.appendChild(h('h3', null, 'URL or file'));
+  urlZone.appendChild(h('div', { class: 'sub' }, 'Paste a Google Docs/Drive URL or upload a file. Default: reference (something to consult). Toggle to artifact for completed outputs.'));
+  const kindRefArt = { value: 'reference' };
+  const refSeg = h('div', { class: 'seg' });
+  ['reference', 'artifact'].forEach(k => {
+    const b = h('button', { class: k === 'reference' ? 'active' : '' }, k);
+    b.addEventListener('click', () => {
+      refSeg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      kindRefArt.value = k;
+    });
+    refSeg.appendChild(b);
+  });
+  const title = h('input', { class: 'input', placeholder: 'Title', style: { marginTop: '12px' } });
+  const url = h('input', { class: 'input', placeholder: 'https://docs.google.com/…', style: { marginTop: '8px' } });
+  const fileIn = h('input', { type: 'file', style: { marginTop: '8px' } });
+  const urlSubmit = h('button', { class: 'btn primary', style: { marginTop: '12px' } }, 'Save');
+  urlSubmit.addEventListener('click', async () => {
+    const t = title.value.trim();
+    if (!t) { toast('Title required', 'err'); return; }
+    const endpoint = kindRefArt.value === 'artifact' ? '/api/artifacts' : '/api/references';
+    try {
+      if (fileIn.files?.[0]) {
+        const fd = new FormData();
+        fd.append('file', fileIn.files[0]);
+        fd.append('title', t);
+        if (url.value.trim()) fd.append('external_url', url.value.trim());
+        const res = await fetch(endpoint, { method: 'POST', body: fd });
+        if (!res.ok) throw new Error((await res.json()).error || 'upload failed');
+      } else {
+        await api(endpoint, 'POST', { title: t, external_url: url.value.trim() || null });
+      }
+      toast(`${kindRefArt.value} saved`, 'ok');
+      title.value = ''; url.value = ''; fileIn.value = '';
+    } catch (err) { toast(err.message, 'err'); }
+  });
+  urlZone.append(
+    h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Kind'),
+    refSeg, title, url, fileIn, urlSubmit,
+  );
+  grid.appendChild(urlZone);
+
+  // Voice
+  const voiceZone = h('div', { class: 'cap-zone' });
+  voiceZone.appendChild(h('h3', null, 'Voice memo'));
+  voiceZone.appendChild(h('div', { class: 'sub' }, 'Paste a transcript. Parsed into pointer-summaries and filed to the day.'));
+  const vDate = h('input', { type: 'date', class: 'input', value: todayIso(), style: { maxWidth: '180px' } });
+  const vText = h('textarea', { class: 'input', rows: 6, placeholder: '"Met with Jake this morning — he asked about the sermon series on sabbath. I pointed him to…"', style: { marginTop: '10px' } });
+  const vBtn = h('button', { class: 'btn primary', style: { marginTop: '12px' } }, 'File voice memo');
+  vBtn.addEventListener('click', async () => {
+    const t = vText.value.trim();
+    if (!t) { toast('Nothing to file', 'err'); return; }
+    try {
+      vBtn.disabled = true;
+      await api('/api/ingest/voice', 'POST', { transcript: t, date: vDate.value });
+      toast(`Filed to ${vDate.value}`, 'ok');
+      vText.value = '';
+      await loadBacklog(streamHost);
+    } catch (err) { toast(err.message, 'err'); }
+    finally { vBtn.disabled = false; }
+  });
+  voiceZone.append(
+    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
+      h('span', { class: 'lbl-mono' }, 'Date'),
+      vDate,
+    ),
+    vText, vBtn,
+  );
+  grid.appendChild(voiceZone);
+}
+
+async function startScanIngest(file, kindHint, host) {
+  host.innerHTML = '';
+  const stream = h('div', { class: 'ingest-stream' });
+  const progress = h('div', { class: 'ingest-progress' }, `Uploading ${file.name}…`);
+  const tiles = h('div');
+  stream.append(progress, tiles);
+  host.appendChild(stream);
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (kindHint && kindHint !== 'page') fd.append('kind', kindHint);
+    const res = await fetch('/api/ingest/stream', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error('upload failed');
+    let total = 1, count = 0;
+    for await (const evt of ndjson(res)) {
+      if (evt.type === 'start') {
+        total = evt.page_count || 1;
+        progress.textContent = total > 1 ? `0 of ${total} pages…` : 'parsing…';
+      } else if (evt.type === 'page') {
+        count++;
+        const p = evt.page || evt;
+        const tile = h('div', { class: 'ingest-tile' },
+          h('img', { src: p.id ? `/api/pages/${p.id}/scan` : '' }),
+          h('div', { class: 'meta' },
+            h('div', { class: 'vp' }, `${p.volume ? 'v.' + p.volume + ' ' : ''}${p.page_number ? 'p.' + p.page_number : ''}`),
+            h('div', { class: 'sum' }, p.summary || '(no summary)'),
+          ),
+        );
+        tile.addEventListener('click', () => navigate('page', p.id));
+        tiles.appendChild(tile);
+        progress.textContent = total > 1 ? `${count} of ${total} pages…` : `${count} parsed`;
+      } else if (evt.type === 'done') {
+        progress.textContent = `Done · ${count} page${count > 1 ? 's' : ''} parsed.`;
+        await loadBacklog(host);
+      } else if (evt.type === 'error') {
+        progress.textContent = `Error: ${evt.error || 'parse failed'}`;
+      }
+    }
+  } catch (err) {
+    progress.textContent = `Error: ${err.message}`;
+  }
+}
+
+async function loadBacklog(host) {
+  try {
+    const res = await api('/api/backlog');
+    const items = res.items || res;
+    const pending = items.filter(b => b.status === 'pending' || b.status === 'open');
+    if (!pending.length) return;
+    const zone = h('div', { class: 'ingest-stream' });
+    zone.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '10px' } }, `Backlog · ${pending.length} question${pending.length > 1 ? 's' : ''}`));
+    backlogState = { queue: pending, idx: 0, container: zone };
+    showBacklogCard();
+    host.appendChild(zone);
+  } catch {}
+}
+
+function showBacklogCard() {
+  const { queue, idx, container } = backlogState;
+  if (!container) return;
+  container.querySelectorAll('.backlog-card').forEach(c => c.remove());
+  if (idx >= queue.length) {
+    container.appendChild(h('div', { class: 'soft mono', style: { fontSize: '11.5px' } }, 'All caught up.'));
+    return;
+  }
+  const b = queue[idx];
+  const card = h('div', { class: 'backlog-card' });
+  card.append(
+    h('div', { class: 'ctx' }, `${idx + 1} of ${queue.length}${b.kind ? ' · ' + b.kind : ''}`),
+    h('div', { class: 'q' }, b.question || b.subject || 'Question'),
+  );
+  let inputEl;
+  const fmt = b.answer_format || 'short';
+  let selectedOption = null;
+  if (fmt === 'choice') {
+    const opts = b.answer_options || [];
+    const list = h('div', { class: 'radio-list' });
+    opts.forEach((opt, i) => {
+      list.appendChild(h('label', null,
+        h('input', { type: 'radio', name: `b-${b.id}`, value: opt, onchange: () => selectedOption = opt }),
+        opt,
+      ));
+    });
+    card.appendChild(list);
+    inputEl = { get value() { return selectedOption; } };
+  } else if (fmt === 'long') {
+    inputEl = h('textarea', { class: 'input', rows: 3, placeholder: 'Answer…' });
+    card.appendChild(inputEl);
+  } else {
+    inputEl = h('input', { class: 'input', placeholder: 'Answer…' });
+    card.appendChild(inputEl);
+  }
+  const actions = h('div', { class: 'backlog-actions' });
+  const submit = h('button', { class: 'btn primary' }, 'Answer');
+  const skip = h('button', { class: 'btn ghost' }, 'Skip');
+  submit.addEventListener('click', async () => {
+    const v = (inputEl.value || '').trim();
+    if (!v) { toast('Answer required', 'err'); return; }
+    try {
+      await api(`/api/backlog/${b.id}`, 'PATCH', { status: 'answered', answer: v });
+      toast('saved', 'ok');
+      backlogState.idx++;
+      showBacklogCard();
+    } catch (err) { toast(err.message, 'err'); }
+  });
+  skip.addEventListener('click', () => { backlogState.idx++; showBacklogCard(); });
+  actions.append(submit, skip);
+  card.appendChild(actions);
+  container.appendChild(card);
+}
+
+// ─── INDEX ─────────────────────────────────
+const KIND_ORDER = [
+  ['collection', 'Collections'],
+  ['person', 'People'],
+  ['topic', 'Topics'],
+  ['book', 'Books'],
+  ['artifact', 'Artifacts'],
+  ['reference', 'References'],
+  ['scripture', 'Scripture'],
+  ['user_index', 'Custom'],
+];
+
+const indexNodeRefs = new Map(); // `${kind}:${id}` -> { row, expand }
+let activeIndexKind = null;
+let cachedIndexTree = null;
+
+async function renderIndex(focusKind, focusId) {
+  indexNodeRefs.clear();
+
+  mainInner.appendChild(h('div', { class: 'surface-head' },
+    h('h1', { class: 'surface-title' }, 'Index'),
+  ));
+
+  // Fetch tree once; cache so tab-switches don't re-fetch
+  if (!cachedIndexTree) {
+    try { cachedIndexTree = await api('/api/index/tree'); }
+    catch (err) { mainInner.appendChild(h('div', { class: 'empty' }, `Couldn't load: ${err.message}`)); return; }
+  }
+  const byKind = {};
+  for (const group of (cachedIndexTree.kinds || [])) byKind[group.kind] = group.active || [];
+
+  // Build available tabs
+  const availableTabs = KIND_ORDER.filter(([kind]) => (byKind[kind] || []).length > 0);
+  if (!availableTabs.length) { mainInner.appendChild(h('div', { class: 'empty' }, 'Nothing indexed yet.')); return; }
+
+  if (!activeIndexKind || !availableTabs.find(([k]) => k === activeIndexKind)) {
+    activeIndexKind = availableTabs[0][0];
+  }
+  if (focusKind && availableTabs.find(([k]) => k === focusKind)) activeIndexKind = focusKind;
+
+  // Tabs
+  const tabsEl = h('div', { class: 'kind-tabs' });
+  mainInner.appendChild(tabsEl);
+  const host = h('div', { class: 'index-kinds' });
+  mainInner.appendChild(host);
+
+  const renderTab = (kind) => {
+    indexNodeRefs.clear();
+    host.innerHTML = '';
+    activeIndexKind = kind;
+    tabsEl.querySelectorAll('.kind-tab').forEach(t => t.classList.toggle('active', t.dataset.kind === kind));
+
+    const roots = byKind[kind] || [];
+    const topLevel = roots.filter(r => !r.parents || r.parents.length === 0);
+    const display = topLevel.length ? topLevel : roots;
+    if (!display.length) { host.appendChild(h('div', { class: 'empty' }, 'Nothing here yet.')); return; }
+    for (const node of display) host.appendChild(renderTreeRow(kind, node, 0));
+
+    if (focusId && kind === focusKind) setTimeout(() => jumpToIndexNode(focusKind, focusId, true), 50);
+  };
+
+  for (const [kind, label] of availableTabs) {
+    const count = (byKind[kind] || []).length;
+    const tab = h('button', { class: 'kind-tab' + (kind === activeIndexKind ? ' active' : ''), dataset: { kind } },
+      label,
+      h('span', { class: 'tab-count' }, String(count)),
+    );
+    tab.addEventListener('click', () => renderTab(kind));
+    tabsEl.appendChild(tab);
+  }
+
+  renderTab(activeIndexKind);
+}
+
+function renderTreeRow(kind, node, depth) {
+  const wrap = h('div');
+  const chevron = h('div', { class: 'tree-chevron' }, '▸');
+  const labelEl = h('div', { class: 'tree-label' + (node._repeat ? ' repeat' : '') }, node.label || node.title || node.canonical || '(untitled)');
+  const totalP = node.totalPageCount ?? node.total_pages ?? node.directPageCount ?? node.page_count ?? null;
+  const counts = h('div', { class: 'tree-counts' }, totalP != null ? String(totalP) : '');
+
+  const actions = h('div', { class: 'tree-actions' });
+  if (!node._repeat) {
+    const renameBtn = buildActionBtn('Rename', () => renameNode(kind, node));
+    const mergeBtn = buildActionBtn('Merge', () => mergeNode(kind, node));
+    const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
+    actions.append(renameBtn, mergeBtn, parentBtn);
+    if (kind === 'collection' || kind === 'artifact') {
+      actions.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
+    }
+  }
+
+  const row = h('div', { class: 'tree-row' }, chevron, labelEl, counts, actions);
+  const panel = h('div', { class: 'tree-panel', style: { display: 'none' } });
+  const kids = h('div', { class: 'tree-children', style: { display: 'none' } });
+
+  let loaded = false;
+  const setOpen = async (force) => {
+    const open = force != null ? force : !chevron.classList.contains('open');
+    chevron.classList.toggle('open', open);
+    row.classList.toggle('expanded', open);
+    panel.style.display = open ? 'block' : 'none';
+    kids.style.display = open ? 'block' : 'none';
+    if (open && !loaded && !node._repeat) {
+      loaded = true;
+      panel.innerHTML = '<div class="soft" style="font-size:12px">loading…</div>';
+      try {
+        const conn = await api(`/api/index/${kind}/${node.id}/connections`);
+        renderConnectionsPanel(panel, kind, node, conn);
+      } catch (err) {
+        panel.innerHTML = '';
+        panel.appendChild(h('div', { class: 'soft' }, `Couldn't load: ${err.message}`));
+      }
+      if (node.children?.length) {
+        for (const c of node.children) kids.appendChild(renderTreeRow(kind, c, depth + 1));
+      }
+    }
+  };
+  chevron.addEventListener('click', (e) => { e.stopPropagation(); setOpen(); });
+  // label click → open entity pages in right pane; chevron only toggles inline metadata
+  labelEl.addEventListener('click', (e) => { e.stopPropagation(); openEntityDetail(kind, node); });
+
+  indexNodeRefs.set(`${kind}:${node.id}`, { row, expand: () => setOpen(true) });
+
+  wrap.append(row, panel, kids);
+  return wrap;
+}
+
+function buildActionBtn(label, onClick) {
+  const b = h('button', { class: 'btn sm' }, label);
+  b.addEventListener('click', (e) => { e.stopPropagation(); onClick(b); });
+  return b;
+}
+
+function renderConnectionsPanel(panel, kind, node, conn) {
+  panel.innerHTML = '';
+
+  // Metadata editors
+  const meta = h('div', { class: 'meta-form' });
+  if (kind === 'person') {
+    meta.append(
+      h('label', null, 'growth'),
+      (() => {
+        const el = h('textarea', { class: 'input', rows: 2, value: node.growthNote || node.growth_note || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/people/${node.id}`, 'PATCH', { growth_note: el.value }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+      h('label', null, 'household'),
+      (() => {
+        const el = h('input', { class: 'input', value: node.household || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/people/${node.id}`, 'PATCH', { household: el.value || null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+      h('label', null, 'priority'),
+      (() => {
+        const el = h('input', { type: 'number', class: 'input', value: node.priority ?? '', min: 0, max: 3 });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/people/${node.id}`, 'PATCH', { priority: el.value === '' ? null : Number(el.value) }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+    );
+  } else if (kind === 'book') {
+    meta.append(
+      h('label', null, 'author'),
+      (() => {
+        const el = h('input', { class: 'input', value: node.author || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/books/${node.id}`, 'PATCH', { author: el.value || null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+      h('label', null, 'year'),
+      (() => {
+        const el = h('input', { type: 'number', class: 'input', value: node.year || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/books/${node.id}`, 'PATCH', { year: el.value ? Number(el.value) : null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+    );
+  } else if (kind === 'collection') {
+    meta.append(
+      h('label', null, 'description'),
+      (() => {
+        const el = h('textarea', { class: 'input', rows: 2, value: node.description || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/collections/${node.id}`, 'PATCH', { description: el.value || null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+    );
+  } else if (kind === 'artifact' || kind === 'reference') {
+    meta.append(
+      h('label', null, 'URL'),
+      (() => {
+        const el = h('input', { class: 'input', value: node.externalUrl || node.external_url || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/${kind}s/${node.id}`, 'PATCH', { external_url: el.value || null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+    );
+  }
+  if (meta.children.length) panel.appendChild(meta);
+
+  // Pages link (as a button that navigates)
+  if (conn.pages_count > 0) {
+    const pagesLink = h('button', { class: 'pages-link' },
+      `${conn.pages_count} page${conn.pages_count > 1 ? 's' : ''}`,
+    );
+    pagesLink.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // TODO: open pages context view; for now, nothing
+      toast(`Opening pages for "${node.label}" — coming soon`, 'ok');
+    });
+    panel.appendChild(h('div', { style: { marginBottom: '10px' } }, pagesLink));
+  }
+
+  // Connection lists
+  const secs = [
+    ['daily_logs', 'Days', 'daily_log'],
+    ['collections', 'Collections', 'collection'],
+    ['artifacts', 'Artifacts', 'artifact'],
+    ['references', 'References', 'reference'],
+  ];
+  let hasAny = false;
+  for (const [key, label, chipKind] of secs) {
+    const items = conn[key] || [];
+    if (!items.length) continue;
+    hasAny = true;
+    panel.appendChild(h('div', { class: 'section-label' }, label));
+    const list = h('div', { class: 'conn-list' });
+    for (const it of items) {
+      const text = chipKind === 'daily_log'
+        ? (it.date + (it.summary ? ` — ${it.summary.slice(0, 48)}` : ''))
+        : (it.title || it.label || '(untitled)');
+      const chip = h('span', { class: `chip kind-${chipKind}` }, text);
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (chipKind === 'daily_log') navigate('day', it.id);
+        else jumpToIndexNode(chipKind, it.id);
+      });
+      list.appendChild(chip);
+    }
+    panel.appendChild(list);
+  }
+
+  if (!hasAny && !conn.pages_count) {
+    panel.appendChild(h('div', { class: 'soft', style: { fontSize: '11.5px', marginTop: '6px' } }, 'No connections yet.'));
+  }
+}
+
+// ── Entity detail (right pane, pages view) ──
+async function openEntityDetail(kind, node) {
+  detailBackContext = null;
+  detailInner.innerHTML = '';
+  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  openDetail();
+
+  let conn;
+  try { conn = await api(`/api/index/${kind}/${node.id}/connections`); }
+  catch (err) { detailInner.innerHTML = ''; detailInner.appendChild(h('div', { class: 'empty' }, err.message)); return; }
+
+  renderEntityDetail(kind, node, conn);
+}
+
+function renderEntityDetail(kind, node, conn) {
+  detailInner.innerHTML = '';
+  const label = node.label || node.title || node.canonical || '(untitled)';
+  const kindLabel = KIND_ORDER.find(([k]) => k === kind)?.[1] || kind;
+
+  const convertBtn = ['artifact', 'reference', 'collection'].includes(kind)
+    ? h('button', { class: 'btn-ghost', onclick: () => convertEntityDetail(kind, node) }, 'Convert to…')
+    : null;
+
+  detailInner.append(
+    h('div', { class: 'detail-head' },
+      h('div', null,
+        h('div', { class: 'sub' }, kindLabel),
+        h('div', { class: 'title' }, label),
+      ),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        convertBtn,
+        h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
+      ),
+    ),
+  );
+
+  const body = h('div', { style: { padding: '20px 4px' } });
+
+  // Pages
+  const pages = conn.pages || [];
+  if (!pages.length) {
+    body.appendChild(h('div', { class: 'empty' }, 'No pages linked yet.'));
+  } else {
+    body.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '10px' } }, `${pages.length} page${pages.length !== 1 ? 's' : ''}`));
+
+    // Group by scan_path for spread support
+    const groups = new Map();
+    for (const p of pages) {
+      const key = p.scan_path || `p:${p.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+
+    for (const [, group] of groups) {
+      const first = group[0];
+      const isVoice = first.source_kind === 'voice_memo' || (first.scan_path || '').startsWith('voice:');
+      const thumb = isVoice
+        ? h('div', { class: 'thumb voice' }, '♪')
+        : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy' }));
+      const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
+      const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
+
+      // Context badges: source (voice, date, collection, artifact, reference)
+      const ctxBadges = [];
+      if (isVoice) ctxBadges.push(h('span', { class: 'ctx-badge voice' }, '♪ voice memo'));
+      const dlDate = first.daily_log_date;
+      if (dlDate) {
+        const [y, mo, d] = dlDate.split('-');
+        const dateStr = new Date(+y, +mo - 1, +d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const badge = h('span', { class: 'ctx-badge date' }, dateStr);
+        badge.addEventListener('click', e => { e.stopPropagation(); navigate('day', first.daily_log_id); });
+        ctxBadges.push(badge);
+      }
+      if (first.collection_titles) {
+        ctxBadges.push(h('span', { class: 'ctx-badge coll' }, first.collection_titles));
+      }
+      if (first.artifact_title) {
+        ctxBadges.push(h('span', { class: 'ctx-badge artifact' }, `artifact: ${first.artifact_title}`));
+      }
+      if (first.reference_title) {
+        ctxBadges.push(h('span', { class: 'ctx-badge reference' }, `ref: ${first.reference_title}`));
+      }
+
+      const tile = h('div', { class: 'day-tile' },
+        thumb,
+        h('div', { class: 'tile-body' },
+          ctxBadges.length ? h('div', { class: 'ctx-badges' }, ...ctxBadges) : null,
+          h('div', { class: 'captions' }, caps),
+          h('div', { class: 'tile-meta' }, `${group.length} page${group.length > 1 ? 's' : ''}${meta ? ' · ' + meta : ''}`),
+        ),
+      );
+      tile.addEventListener('click', () => {
+        detailBackContext = {
+          label,
+          action: () => renderEntityDetail(kind, node, conn),
+        };
+        openPageDetail(first.id);
+      });
+      body.appendChild(tile);
+    }
+  }
+
+  // Connection chips (days, collections, etc.)
+  const connSecs = [
+    ['daily_logs', 'Days', 'daily_log'],
+    ['collections', 'Collections', 'collection'],
+    ['artifacts', 'Artifacts', 'artifact'],
+    ['references', 'References', 'reference'],
+  ];
+  let hasConns = false;
+  const connHost = h('div', { class: 'links-section' });
+  for (const [key, secLabel, chipKind] of connSecs) {
+    const items = conn[key] || [];
+    if (!items.length) continue;
+    hasConns = true;
+    const row = h('div', { class: 'links-group' },
+      h('div', { class: 'links-group-lbl' }, secLabel),
+      h('div', { class: 'links-row' },
+        ...items.map(it => {
+          const text = chipKind === 'daily_log'
+            ? it.date + (it.summary ? ` — ${it.summary.slice(0, 40)}` : '')
+            : (it.title || it.label || '(untitled)');
+          const chip = h('span', { class: `chip kind-${chipKind}` }, text);
+          chip.addEventListener('click', () => chipKind === 'daily_log' ? navigate('day', it.id) : jumpToIndexNode(chipKind, it.id));
+          return chip;
+        }),
+      ),
+    );
+    connHost.appendChild(row);
+  }
+  if (hasConns) body.appendChild(connHost);
+
+  detailInner.appendChild(body);
+}
+
+function invalidateIndexCache() { cachedIndexTree = null; }
+
+async function renameNode(kind, node) {
+  const next = prompt(`Rename "${node.label}":`, node.label);
+  if (!next || next === node.label) return;
+  try {
+    await api(`/api/index/${kind}/${node.id}/rename`, 'POST', { label: next });
+    toast('renamed', 'ok');
+    invalidateIndexCache();
+    mainInner.innerHTML = '';
+    renderIndex();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+async function mergeNode(kind, node) {
+  const targetLabel = prompt(`Merge "${node.label}" into (type exact label):`);
+  if (!targetLabel) return;
+  try {
+    const search = await api(`/api/index/search?q=${encodeURIComponent(targetLabel.replace(/['"*]/g, ' '))}`);
+    const match = (search.results || []).find(r => r.kind === kind && r.label.toLowerCase() === targetLabel.toLowerCase());
+    if (!match) { toast('No exact match found', 'err'); return; }
+    if (match.id === node.id) { toast('Cannot merge into self', 'err'); return; }
+    if (!confirm(`Merge "${node.label}" into "${match.label}"? This is irreversible.`)) return;
+    await api(`/api/index/${kind}/${node.id}/merge`, 'POST', { into_id: match.id });
+    toast('merged', 'ok');
+    invalidateIndexCache();
+    mainInner.innerHTML = '';
+    renderIndex();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function convertEntityDetail(kind, node) {
+  const TARGETS = {
+    artifact:   ['reference', 'collection'],
+    reference:  ['artifact',  'collection'],
+    collection: ['artifact',  'reference'],
+  };
+  const targets = TARGETS[kind];
+  if (!targets) return;
+
+  const anchorBtn = [...document.querySelectorAll('#detail button')].find(b => b.textContent.trim() === 'Convert to…');
+  const rect = anchorBtn ? anchorBtn.getBoundingClientRect() : { left: 200, bottom: 220 };
+
+  const pop = h('div', { class: 'typeahead-pop', style: { minWidth: '160px' } });
+  const list = h('div', { class: 'typeahead-list' });
+  pop.appendChild(list);
+  document.body.appendChild(pop);
+  const rightOffset = Math.max(4, window.innerWidth - (anchorBtn ? anchorBtn.getBoundingClientRect().right : window.innerWidth - 4));
+  Object.assign(pop.style, {
+    position: 'fixed',
+    top: `${Math.min(rect.bottom + 4, window.innerHeight - 120)}px`,
+    right: `${rightOffset}px`,
+    left: 'auto',
+  });
+
+  const close = () => { pop.remove(); document.removeEventListener('mousedown', away); };
+  const away = (e) => { if (!pop.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('mousedown', away), 0);
+
+  for (const toKind of targets) {
+    const label = toKind.charAt(0).toUpperCase() + toKind.slice(1);
+    const row = h('div', { class: 'typeahead-row' }, h('span', null, label));
+    row.addEventListener('click', async () => {
+      close();
+      if (!confirm(`Convert to ${label}? All linked pages and connections will be preserved.`)) return;
+      try {
+        const r = await api(`/api/index/${kind}/${node.id}/convert`, 'POST', { to_kind: toKind });
+        toast(`Converted to ${label}`, 'ok');
+        invalidateIndexCache();
+        mainInner.innerHTML = '';
+        renderIndex();
+        openEntityDetail(toKind, { id: r.id, label: r.label });
+      } catch (err) { toast(err.message, 'err'); }
+    });
+    list.appendChild(row);
+  }
+}
+
+async function archiveNode(kind, node) {
+  if (!confirm(`Archive "${node.label}"?`)) return;
+  try {
+    await api(`/api/index/${kind}/${node.id}/archive`, 'POST', { archived: true });
+    toast('archived', 'ok');
+    invalidateIndexCache();
+    mainInner.innerHTML = '';
+    renderIndex();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function setParent(kind, node, anchorBtn) {
+  openTypeahead({
+    anchor: anchorBtn || null,
+    placeholder: 'Find a parent…',
+    onPick: async (r) => {
+      try {
+        await api(`/api/index/${kind}/${node.id}/parent`, 'POST', { parent_kind: r.kind, parent_id: r.id });
+        toast('parent set', 'ok');
+        invalidateIndexCache();
+        mainInner.innerHTML = '';
+        renderIndex();
+      } catch (err) { toast(err.message, 'err'); }
+    },
+  });
+}
+
+async function jumpToIndexNode(kind, id, alreadyOnIndex = false) {
+  if (!alreadyOnIndex) {
+    // Navigate to index with the target kind+id in the hash so renderIndex
+    // switches to the right tab and calls jumpToIndexNode(kind, id, true) itself.
+    currentLeftHash = `#/index/${kind}/${id}`;
+    location.hash = `#/index/${kind}/${id}`;
+    return;
+  }
+  // Already on the right tab — scroll to the row.
+  const key = `${kind}:${id}`;
+  const tries = [0, 80, 200, 450];
+  for (const t of tries) {
+    await new Promise(r => setTimeout(r, t));
+    const ref = indexNodeRefs.get(key);
+    if (ref) {
+      ref.expand();
+      ref.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      ref.row.style.transition = 'background 600ms';
+      ref.row.style.background = 'var(--accent-soft)';
+      setTimeout(() => { ref.row.style.background = ''; }, 1200);
+      return;
+    }
+  }
+  toast(`Couldn't find ${kind} in index`, 'err');
+}
+
+// ─── Cmd+K palette ─────────────────────────
+const cmdkEl = document.getElementById('cmdk');
+const cmdkInput = document.getElementById('cmdk-input');
+const cmdkList = document.getElementById('cmdk-list');
+let cmdkActive = 0;
+let cmdkRows = [];
+let cmdkTimer = null;
+
+function openCmdk() {
+  cmdkEl.classList.add('open');
+  cmdkInput.value = '';
+  cmdkList.innerHTML = '';
+  cmdkRows = [];
+  cmdkActive = 0;
+  cmdkInput.focus();
+  // Seed with recent daily logs (current month)
+  api(`/api/logs/month/${ymNow()}`).then(res => {
+    if (cmdkInput.value) return; // user already typed
+    const hasDays = (res.days || []).filter(d => d.daily_log_id);
+    cmdkRenderSeed(hasDays);
+  }).catch(() => {});
+}
+function closeCmdk() {
+  cmdkEl.classList.remove('open');
+  cmdkInput.blur();
+}
+document.getElementById('cmdk-backdrop').addEventListener('click', closeCmdk);
+
+function cmdkRenderSeed(days) {
+  cmdkList.innerHTML = '';
+  cmdkRows = [];
+  cmdkActive = 0;
+  if (!days.length) return;
+  const sec = h('div', { class: 'cmdk-section' });
+  sec.appendChild(h('div', { class: 'cmdk-section-lbl' }, 'Recent days'));
+  for (const d of days.slice(-10).reverse()) {
+    const row = h('div', { class: 'cmdk-row' },
+      h('span', { class: 'cmdk-lbl' }, d.date),
+      d.preview ? h('span', { class: 'cmdk-sub' }, d.preview.slice(0, 60)) : null,
+      h('span', { class: 'cmdk-kind' }, 'day'),
+    );
+    row.addEventListener('click', () => { closeCmdk(); navigate('day', d.daily_log_id); });
+    sec.appendChild(row);
+    cmdkRows.push({ el: row, action: () => { closeCmdk(); navigate('day', d.daily_log_id); } });
+  }
+  cmdkList.appendChild(sec);
+  cmdkHighlight();
+}
+
+async function cmdkQuery(q) {
+  cmdkList.innerHTML = '';
+  cmdkRows = [];
+  cmdkActive = 0;
+  if (!q) return;
+
+  // Date shorthand: "apr 3", "3 apr", "2026-04-03", "apr", YYYY-MM
+  const dateMatch = tryParseDate(q);
+  if (dateMatch) {
+    const row = h('div', { class: 'cmdk-row' },
+      h('span', { class: 'cmdk-lbl' }, dateMatch.label),
+      h('span', { class: 'cmdk-kind' }, 'day'),
+    );
+    const go = async () => {
+      closeCmdk();
+      const res = await api(`/api/logs/month/${dateMatch.ym}`);
+      const day = (res.days || []).find(d => d.date === dateMatch.date);
+      if (day?.daily_log_id) navigate('day', day.daily_log_id);
+      else navigate('log', dateMatch.ym);
+    };
+    row.addEventListener('click', go);
+    const sec = h('div', { class: 'cmdk-section' });
+    sec.appendChild(h('div', { class: 'cmdk-section-lbl' }, 'Date'));
+    sec.appendChild(row);
+    cmdkList.appendChild(sec);
+    cmdkRows.push({ el: row, action: go });
+    cmdkHighlight();
+    return;
+  }
+
+  try {
+    const safe = q.replace(/['"*]/g, ' ').trim();
+    const res = await api(`/api/index/search?q=${encodeURIComponent(safe)}`);
+    const results = res.results || [];
+    if (!results.length) {
+      cmdkList.appendChild(h('div', { class: 'cmdk-empty' }, 'No results.'));
+      return;
+    }
+    // Group by kind
+    const grouped = new Map();
+    for (const r of results.slice(0, 30)) {
+      const k = r.kind;
+      if (!grouped.has(k)) grouped.set(k, []);
+      grouped.get(k).push(r);
+    }
+    for (const [kind, items] of grouped) {
+      const sec = h('div', { class: 'cmdk-section' });
+      const kindLabel = { collection: 'Collections', person: 'People', topic: 'Topics', book: 'Books', artifact: 'Artifacts', reference: 'References', scripture: 'Scripture', user_index: 'Custom' }[kind] || kind;
+      sec.appendChild(h('div', { class: 'cmdk-section-lbl' }, kindLabel));
+      for (const r of items.slice(0, 8)) {
+        const row = h('div', { class: 'cmdk-row' },
+          h('span', { class: 'cmdk-lbl' }, r.label),
+          h('span', { class: 'cmdk-kind' }, kind.replace('_', ' ')),
+        );
+        const go = () => { closeCmdk(); jumpToIndexNode(kind, r.id); };
+        row.addEventListener('click', go);
+        sec.appendChild(row);
+        cmdkRows.push({ el: row, action: go });
+      }
+      cmdkList.appendChild(sec);
+    }
+    cmdkHighlight();
+  } catch {}
+}
+
+function tryParseDate(q) {
+  q = q.trim().toLowerCase();
+  const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const fullMonths = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q)) {
+    return { date: q, ym: q.slice(0,7), label: q };
+  }
+  // YYYY-MM
+  if (/^\d{4}-\d{2}$/.test(q)) {
+    const [y, m] = q.split('-').map(Number);
+    const d = new Date(y, m-1, 1);
+    return { date: q + '-01', ym: q, label: d.toLocaleString('en-US',{month:'long',year:'numeric'}) };
+  }
+  // "apr 3" or "3 apr" or "april 3" etc.
+  const parts = q.split(/[\s,]+/).filter(Boolean);
+  const now = new Date();
+  if (parts.length === 2) {
+    let monthIdx = -1, day = 0;
+    for (const p of parts) {
+      const mi = months.indexOf(p.slice(0,3));
+      if (mi >= 0) { monthIdx = mi; continue; }
+      const fi = fullMonths.indexOf(p);
+      if (fi >= 0) { monthIdx = fi; continue; }
+      if (/^\d{1,2}$/.test(p)) day = Number(p);
+    }
+    if (monthIdx >= 0 && day > 0) {
+      const y = now.getFullYear();
+      const date = `${y}-${String(monthIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      const ym = date.slice(0,7);
+      const label = new Date(date+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'long',day:'numeric'});
+      return { date, ym, label };
+    }
+  }
+  // single month name → go to that month in current year
+  if (parts.length === 1) {
+    const mi = months.indexOf(parts[0].slice(0,3));
+    const fi = fullMonths.indexOf(parts[0]);
+    const idx = mi >= 0 ? mi : fi;
+    if (idx >= 0) {
+      const y = now.getFullYear();
+      const ym = `${y}-${String(idx+1).padStart(2,'0')}`;
+      const label = new Date(y, idx, 1).toLocaleString('en-US',{month:'long',year:'numeric'});
+      return { date: ym+'-01', ym, label };
+    }
+  }
+  return null;
+}
+
+function cmdkHighlight() {
+  cmdkRows.forEach((r, i) => r.el.classList.toggle('active', i === cmdkActive));
+}
+
+cmdkInput.addEventListener('input', () => {
+  clearTimeout(cmdkTimer);
+  cmdkTimer = setTimeout(() => cmdkQuery(cmdkInput.value.trim()), 160);
+});
+cmdkInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeCmdk(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); cmdkActive = Math.min(cmdkActive+1, cmdkRows.length-1); cmdkHighlight(); cmdkRows[cmdkActive]?.el.scrollIntoView({block:'nearest'}); }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); cmdkActive = Math.max(cmdkActive-1, 0); cmdkHighlight(); cmdkRows[cmdkActive]?.el.scrollIntoView({block:'nearest'}); }
+  if (e.key === 'Enter') { cmdkRows[cmdkActive]?.action(); }
+});
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    cmdkEl.classList.contains('open') ? closeCmdk() : openCmdk();
+  }
+});
+
+// ─── boot ──────────────────────────────────
+if (!location.hash || location.hash === '#') location.hash = '#/log/' + ymNow();
+route();
+</script>
+</body>
+</html>
