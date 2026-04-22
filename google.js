@@ -3,23 +3,33 @@
 // Flow:
 //   1. User clicks "Connect Google" → /api/google/connect → 302 to Google consent
 //   2. Google redirects to /api/google/oauth-callback?code=…
-//   3. Server exchanges the code for tokens and stores refresh_token in SQLite.
+//   3. Server exchanges the code for tokens and stores refresh_token in per-user SQLite.
 //   4. fetchContentForUrl(url) resolves a Docs/Drive URL to plain text, using the
 //      refresh_token to mint short-lived access_tokens as needed.
 //
-// Credentials come from the JSON file at GOOGLE_OAUTH_CLIENT_JSON (env var), or,
-// if unset, from the hard-coded path below. In either case, the file is the
-// "installed" client JSON downloaded from the GCP console (Desktop app client).
+// Credentials: set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET env vars (preferred),
+// or set GOOGLE_OAUTH_CLIENT_JSON to the path of the downloaded client JSON file.
 
 const fs = require('fs');
 const path = require('path');
-const db = require('./db');
+const _requestContext = require('./context');
 
-const DEFAULT_CLIENT_JSON = '/Users/nathancolestock/Downloads/client_secret_591963216284-5stv621t6i2gsosbeg1a7a5es87k94fs.apps.googleusercontent.com.json';
+function _db() {
+  const s = _requestContext.getStore();
+  return s ? s.db : require('./db');
+}
 
 function loadClient() {
-  const p = process.env.GOOGLE_OAUTH_CLIENT_JSON || DEFAULT_CLIENT_JSON;
-  if (!fs.existsSync(p)) return null;
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    return {
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+      token_uri: process.env.GOOGLE_TOKEN_URI || 'https://oauth2.googleapis.com/token',
+    };
+  }
+  const p = process.env.GOOGLE_OAUTH_CLIENT_JSON;
+  if (!p || !fs.existsSync(p)) return null;
   const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
   const inst = raw.installed || raw.web || null;
   if (!inst) return null;
@@ -37,23 +47,21 @@ const SCOPES = [
 ];
 
 function getRedirectUri(req) {
-  // The "installed" client accepts any http://localhost URI. Use the current host
-  // so callback works whether the app is at :3747, :5173, etc.
-  const proto = req && req.protocol || 'http';
+  const proto = (req && req.protocol) || 'http';
   const host = (req && req.get && req.get('host')) || `localhost:${process.env.PORT || 3747}`;
   return `${proto}://${host}/api/google/oauth-callback`;
 }
 
 function buildAuthUrl(req) {
   const client = loadClient();
-  if (!client) throw new Error('Google OAuth client JSON not found. Set GOOGLE_OAUTH_CLIENT_JSON env var.');
+  if (!client) throw new Error('Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars.');
   const params = new URLSearchParams({
     client_id: client.client_id,
     redirect_uri: getRedirectUri(req),
     response_type: 'code',
     scope: SCOPES.join(' '),
     access_type: 'offline',
-    prompt: 'consent',        // forces refresh_token on every consent
+    prompt: 'consent',
     include_granted_scopes: 'true',
   });
   return `${client.auth_uri}?${params.toString()}`;
@@ -61,7 +69,7 @@ function buildAuthUrl(req) {
 
 async function exchangeCode(code, req) {
   const client = loadClient();
-  if (!client) throw new Error('Google OAuth client JSON not found');
+  if (!client) throw new Error('Google OAuth not configured');
   const body = new URLSearchParams({
     code,
     client_id: client.client_id,
@@ -78,24 +86,23 @@ async function exchangeCode(code, req) {
   if (!resp.ok) throw new Error(`token exchange failed: ${data.error || resp.statusText} ${data.error_description || ''}`);
   if (!data.refresh_token) throw new Error('No refresh_token returned — try disconnecting and reconnecting.');
   const expires_at = data.expires_in ? new Date(Date.now() + (data.expires_in - 30) * 1000).toISOString() : null;
-  db.saveGoogleTokens({
+  _db().saveGoogleTokens({
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     expires_at,
     scope: data.scope,
   });
-  return db.getGoogleTokens();
+  return _db().getGoogleTokens();
 }
 
 async function getAccessToken() {
-  const row = db.getGoogleTokens();
+  const row = _db().getGoogleTokens();
   if (!row || !row.refresh_token) throw new Error('Google not connected — visit /api/google/connect first');
   if (row.access_token && row.expires_at && new Date(row.expires_at) > new Date()) {
     return row.access_token;
   }
-  // refresh
   const client = loadClient();
-  if (!client) throw new Error('Google OAuth client JSON not found');
+  if (!client) throw new Error('Google OAuth not configured');
   const body = new URLSearchParams({
     client_id: client.client_id,
     client_secret: client.client_secret,
@@ -110,7 +117,7 @@ async function getAccessToken() {
   const data = await resp.json();
   if (!resp.ok) throw new Error(`token refresh failed: ${data.error || resp.statusText}`);
   const expires_at = data.expires_in ? new Date(Date.now() + (data.expires_in - 30) * 1000).toISOString() : null;
-  db.saveGoogleTokens({
+  _db().saveGoogleTokens({
     access_token: data.access_token,
     refresh_token: data.refresh_token || row.refresh_token,
     expires_at,
@@ -119,12 +126,6 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-// Parse a Google URL into { kind, fileId }. Supports:
-//   docs.google.com/document/d/<id>/…          → kind 'doc'
-//   docs.google.com/spreadsheets/d/<id>/…      → kind 'sheet'
-//   docs.google.com/presentation/d/<id>/…      → kind 'slides'
-//   drive.google.com/file/d/<id>/…             → kind 'drive-file'
-//   drive.google.com/open?id=<id>              → kind 'drive-file'
 function parseGoogleUrl(url) {
   if (!url) return null;
   try {
@@ -153,7 +154,6 @@ async function fetchContentForUrl(url) {
   const headers = { Authorization: `Bearer ${token}` };
 
   if (parsed.kind === 'doc') {
-    // Docs API returns structured JSON; export endpoint gives plain text.
     const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${parsed.fileId}/export?mimeType=text/plain`, { headers });
     if (!resp.ok) throw new Error(`Google Docs export failed: ${resp.status} ${await resp.text()}`);
     return { kind: 'doc', content: await resp.text() };
@@ -169,7 +169,6 @@ async function fetchContentForUrl(url) {
     return { kind: 'slides', content: await resp.text() };
   }
   if (parsed.kind === 'drive-file') {
-    // First fetch metadata to pick an export vs direct download.
     const metaResp = await fetch(`https://www.googleapis.com/drive/v3/files/${parsed.fileId}?fields=id,name,mimeType`, { headers });
     if (!metaResp.ok) throw new Error(`Drive metadata failed: ${metaResp.status} ${await metaResp.text()}`);
     const meta = await metaResp.json();
@@ -190,7 +189,6 @@ async function fetchContentForUrl(url) {
       const r = await fetch(`https://www.googleapis.com/drive/v3/files/${parsed.fileId}?alt=media`, { headers });
       return { kind: 'text', content: await r.text(), name: meta.name, mime };
     }
-    // Binary file — store a metadata-only marker.
     return { kind: 'binary', content: `[${mime} · ${meta.name}]`, name: meta.name, mime };
   }
   throw new Error(`Unsupported Google URL kind: ${parsed.kind}`);
@@ -201,7 +199,7 @@ function isConfigured() {
 }
 
 function status() {
-  const row = db.getGoogleTokens();
+  const row = _db().getGoogleTokens();
   return {
     configured: isConfigured(),
     connected: !!(row && row.refresh_token),

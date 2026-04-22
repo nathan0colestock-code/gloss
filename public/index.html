@@ -954,7 +954,32 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 </head>
 <body>
 
-<div id="shell">
+<!-- Auth screen — shown before login, hidden after. Overlays everything. -->
+<div id="auth-screen" style="display:none;position:fixed;inset:0;background:var(--paper);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="width:320px;display:flex;flex-direction:column;gap:12px;">
+    <h1 style="font-family:var(--font-hand-h);font-size:32px;margin:0 0 4px;color:var(--accent)">Gloss<span style="opacity:.4">.</span></h1>
+    <div id="auth-tabs" style="display:flex;gap:8px;margin-bottom:4px;">
+      <button class="pill accent" id="auth-tab-login" onclick="setAuthMode('login')">Sign in</button>
+      <button class="pill ghost" id="auth-tab-register" onclick="setAuthMode('register')" id="auth-tab-register">Register</button>
+    </div>
+    <input id="auth-email" class="input" type="email" placeholder="Email" autocomplete="email">
+    <input id="auth-password" class="input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAuth()">
+    <div id="auth-error" style="color:var(--danger,#c0392b);font-size:13px;min-height:18px;"></div>
+    <button class="pill accent" id="auth-submit" onclick="submitAuth()">Sign in</button>
+  </div>
+  <!-- Gemini key setup — shown after first login if no key set -->
+  <div id="gemini-setup" style="display:none;width:320px;margin-top:24px;display:flex;flex-direction:column;gap:12px;">
+    <p style="font-size:13px;color:var(--ink-2);margin:0">Add your Gemini API key to enable AI parsing. Get one free at <span style="font-family:var(--font-mono);font-size:12px">aistudio.google.com</span>.</p>
+    <input id="gemini-key-input" class="input mono" type="password" placeholder="AIza…" autocomplete="off" onkeydown="if(event.key==='Enter')saveGeminiKey()">
+    <div id="gemini-key-error" style="color:var(--danger,#c0392b);font-size:13px;min-height:18px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="pill accent" onclick="saveGeminiKey()">Save key</button>
+      <button class="pill ghost" onclick="skipGeminiKey()">Skip for now</button>
+    </div>
+  </div>
+</div>
+
+<div id="shell" style="display:none">
   <nav id="rail">
     <div class="rail-head">
       <h1 id="brand">Gloss<span class="dot">.</span></h1>
@@ -1063,6 +1088,101 @@ function dateLabel(iso) {
 }
 
 // ─── api ────────────────────────────────────
+// ── Auth helpers ─────────────────────────────────────────────────────────────
+let _authMode = 'login';
+
+async function initApp() {
+  try {
+    const res = await fetch('/auth/me');
+    if (res.status === 401) { showAuthScreen(); return; }
+    const user = await res.json();
+    if (!user.has_gemini_key) { showAuthScreen(true); return; }
+    hideAuthScreen();
+    loadInitialData();
+  } catch (e) {
+    showAuthScreen();
+  }
+}
+
+function showAuthScreen(showGeminiSetup = false) {
+  document.getElementById('shell').style.display = 'none';
+  const scr = document.getElementById('auth-screen');
+  scr.style.display = 'flex';
+  if (showGeminiSetup) {
+    document.getElementById('auth-tabs').style.display = 'none';
+    document.getElementById('auth-email').style.display = 'none';
+    document.getElementById('auth-password').style.display = 'none';
+    document.getElementById('auth-submit').style.display = 'none';
+    document.getElementById('auth-error').style.display = 'none';
+    document.getElementById('gemini-setup').style.display = 'flex';
+  }
+}
+
+function hideAuthScreen() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('shell').style.display = '';
+}
+
+function setAuthMode(mode) {
+  _authMode = mode;
+  document.getElementById('auth-tab-login').className = mode === 'login' ? 'pill accent' : 'pill ghost';
+  document.getElementById('auth-tab-register').className = mode === 'register' ? 'pill accent' : 'pill ghost';
+  document.getElementById('auth-submit').textContent = mode === 'login' ? 'Sign in' : 'Register';
+  document.getElementById('auth-error').textContent = '';
+}
+
+async function submitAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'Email and password required.'; return; }
+  try {
+    const endpoint = _authMode === 'login' ? '/auth/login' : '/auth/register';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Failed.'; return; }
+    if (!data.has_gemini_key) { showAuthScreen(true); return; }
+    hideAuthScreen();
+    loadInitialData();
+  } catch (e) {
+    document.getElementById('auth-error').textContent = e.message;
+  }
+}
+
+async function saveGeminiKey() {
+  const key = document.getElementById('gemini-key-input').value.trim();
+  const errEl = document.getElementById('gemini-key-error');
+  errEl.textContent = '';
+  if (!key) { errEl.textContent = 'Please enter your API key.'; return; }
+  try {
+    const res = await fetch('/auth/api-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gemini_api_key: key }),
+    });
+    if (!res.ok) { const d = await res.json(); errEl.textContent = d.error || 'Failed.'; return; }
+    hideAuthScreen();
+    loadInitialData();
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+function skipGeminiKey() {
+  hideAuthScreen();
+  loadInitialData();
+}
+
+function loadInitialData() {
+  if (!location.hash || location.hash === '#') location.hash = '#/log/' + ymNow();
+  route();
+}
+
 async function api(path, method = 'GET', body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
@@ -1070,6 +1190,10 @@ async function api(path, method = 'GET', body) {
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(path, opts);
+  if (res.status === 401) {
+    showAuthScreen();
+    throw new Error('Not authenticated');
+  }
   if (!res.ok) {
     let msg; try { const j = await res.json(); msg = j.detail ? `${j.error}: ${j.detail}` : j.error; } catch {}
     throw new Error(msg || `${res.status} ${res.statusText}`);
@@ -2990,8 +3114,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── boot ──────────────────────────────────
-if (!location.hash || location.hash === '#') location.hash = '#/log/' + ymNow();
-route();
+initApp();
 </script>
 </body>
 </html>

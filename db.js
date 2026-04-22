@@ -2,14 +2,11 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = process.env.TEST_DB_PATH || path.join(DATA_DIR, 'foxed.db');
-
-fs.mkdirSync(path.join(DATA_DIR, 'scans'), { recursive: true });
-
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+function createDb(dbPath) {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS pages (
@@ -299,7 +296,7 @@ db.exec(`
 // context), and last_classified_at (timestamp of the most recent full sweep).
 {
   const cols = db.pragma('table_info(books)').map(c => c.name);
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE books ADD COLUMN archived_at TEXT');
+  if (cols.length > 0 && !cols.includes('archived_at')) db.exec('ALTER TABLE books ADD COLUMN archived_at TEXT');
 }
 {
   const cols = db.pragma('table_info(user_indexes)').map(c => c.name);
@@ -338,18 +335,26 @@ db.exec(`
 {
   const exists = db.prepare(`SELECT COUNT(*) as c FROM index_parents`).get().c;
   if (exists === 0) {
-    const now = new Date().toISOString();
-    const ins = db.prepare(`
-      INSERT OR IGNORE INTO index_parents (id, child_kind, child_id, parent_kind, parent_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    const collParents = db.prepare(`SELECT id, parent_id FROM collections WHERE parent_id IS NOT NULL AND parent_id != ''`).all();
-    for (const r of collParents) {
-      ins.run(`ip_${r.id}_${r.parent_id}`, 'collection', r.id, 'collection', r.parent_id, now);
-    }
-    const topicParents = db.prepare(`SELECT id, parent_id FROM entities WHERE kind='topic' AND parent_id IS NOT NULL AND parent_id != ''`).all();
-    for (const r of topicParents) {
-      ins.run(`ip_${r.id}_${r.parent_id}`, 'topic', r.id, 'topic', r.parent_id, now);
+    const collCols = db.pragma('table_info(collections)').map(c => c.name);
+    const entCols  = db.pragma('table_info(entities)').map(c => c.name);
+    if (collCols.includes('parent_id') || entCols.includes('parent_id')) {
+      const now = new Date().toISOString();
+      const ins = db.prepare(`
+        INSERT OR IGNORE INTO index_parents (id, child_kind, child_id, parent_kind, parent_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      if (collCols.includes('parent_id')) {
+        const collParents = db.prepare(`SELECT id, parent_id FROM collections WHERE parent_id IS NOT NULL AND parent_id != ''`).all();
+        for (const r of collParents) {
+          ins.run(`ip_${r.id}_${r.parent_id}`, 'collection', r.id, 'collection', r.parent_id, now);
+        }
+      }
+      if (entCols.includes('parent_id')) {
+        const topicParents = db.prepare(`SELECT id, parent_id FROM entities WHERE kind='topic' AND parent_id IS NOT NULL AND parent_id != ''`).all();
+        for (const r of topicParents) {
+          ins.run(`ip_${r.id}_${r.parent_id}`, 'topic', r.id, 'topic', r.parent_id, now);
+        }
+      }
     }
   }
 }
@@ -381,7 +386,6 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS ux_collections_kind_title ON collections(kind, title COLLATE NOCASE);
   CREATE UNIQUE INDEX IF NOT EXISTS ux_scripture_canonical   ON scripture_refs(canonical COLLATE NOCASE);
   CREATE UNIQUE INDEX IF NOT EXISTS ux_people_label          ON people(label COLLATE NOCASE);
-  CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_logs_date       ON daily_logs(date);
   CREATE UNIQUE INDEX IF NOT EXISTS ux_user_indexes_title    ON user_indexes(title COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS ix_links_to                     ON links(to_type, to_id);
   CREATE INDEX IF NOT EXISTS ix_links_from                   ON links(from_type, from_id);
@@ -456,8 +460,8 @@ db.exec(`
 }
 {
   const cols = db.pragma('table_info(daily_logs)').map(c => c.name);
-  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
-  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
+  if (cols.length > 0 && !cols.includes('content_hash'))         db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
+  if (cols.length > 0 && !cols.includes('links_classified_at'))  db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
 }
 
 // Dedupe links after a merge moves (to_type,to_id) pointers. Keeps the earliest
@@ -1095,6 +1099,7 @@ db.exec(`
     author_label TEXT,
     year TEXT,
     notes TEXT,
+    archived_at TEXT,
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_books_author ON books(author_entity_id);
@@ -1110,9 +1115,12 @@ db.exec(`
     date TEXT NOT NULL UNIQUE,        -- ISO YYYY-MM-DD
     summary TEXT,
     archived_at TEXT,
+    content_hash TEXT,
+    links_classified_at TEXT,
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(date);
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_logs_date ON daily_logs(date);
 
   CREATE TABLE IF NOT EXISTS monthly_summaries (
     year_month TEXT PRIMARY KEY,      -- YYYY-MM
@@ -5325,7 +5333,7 @@ function getHomePayload() {
   };
 }
 
-module.exports = {
+  return {
   insertPage, getPage, getRecentPages, applyThreadingForPage, findPageByVolumeAndNumber,
   findPendingPageRefProposals,
   removePageLinksByType, removePageLinkToTarget, removePageUserIndexLink,
@@ -5412,4 +5420,11 @@ module.exports = {
   addUserIndexInclusion, removeUserIndexInclusion,
   purgeUserIndexFilters, purgeAutoUserIndexExclusions,
   getCrossKindContent, refreshContentHash, markLinksClassified, listCrossKindCandidates,
-};
+  };
+} // end createDb
+
+const _defaultDb = createDb(
+  process.env.TEST_DB_PATH || path.join(__dirname, 'data', 'foxed.db')
+);
+module.exports = _defaultDb;
+module.exports.createDb = createDb;

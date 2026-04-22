@@ -1,0 +1,50 @@
+# Fly.io configuration for Foxed.
+#
+# IMPORTANT: SQLite + a single persistent volume does NOT support multiple
+# machines. Keep min_machines_running = 1 and do NOT enable autoscaling.
+#
+# First deploy:
+#   fly volumes create foxed_data --region iad --size 10
+#   fly secrets set \
+#     SESSION_SECRET="$(openssl rand -hex 32)" \
+#     GEMINI_API_KEY="" \
+#     GOOGLE_CLIENT_ID="..." \
+#     GOOGLE_CLIENT_SECRET="..." \
+#     ALLOW_REGISTRATION=true
+#   fly deploy
+#   # After creating your account:
+#   fly secrets set ALLOW_REGISTRATION=false
+
+app = "foxed"
+primary_region = "iad"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "5s"
+    interval = "30s"
+    method = "GET"
+    path = "/auth/me"
+    protocol = "http"
+    timeout = "5s"
+
+[[mounts]]
+  source = "foxed_data"
+  destination = "/app/data"
+  initial_size = "10gb"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

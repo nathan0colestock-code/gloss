@@ -1,7 +1,18 @@
 const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
+const _requestContext = require('./context');
 
-const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Per-user Gemini clients cached by API key.
+const _clientCache = new Map();
+function _genai() {
+  const s = _requestContext.getStore();
+  const key = (s && s.geminiKey) || process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('No Gemini API key configured. Add your key in Settings.');
+  if (!_clientCache.has(key)) _clientCache.set(key, new GoogleGenAI({ apiKey: key }));
+  return _clientCache.get(key);
+}
+// Legacy alias used throughout this file — replaced at call sites with _genai()
+const genai = new Proxy({}, { get: (_, prop) => _genai()[prop] });
 
 const PARSE_MODEL = 'gemini-2.5-pro';
 const CHAT_MODEL = 'gemini-2.5-flash';
