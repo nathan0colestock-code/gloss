@@ -21,8 +21,8 @@ rsync -a --delete "$REPO_DIR/data/references/" "$DEST/references/"
 
 echo "$(date -Iseconds) backup complete → $DEST" >> "$BACKUP_ROOT/backup.log"
 
-# Prune backups older than KEEP_DAYS
-find "$BACKUP_ROOT" -maxdepth 1 -type d -name '????-??-??' | sort | head -n "-$KEEP_DAYS" | while read -r old; do
+# Prune backups older than KEEP_DAYS (sort newest-first, skip first KEEP_DAYS, delete the rest)
+find "$BACKUP_ROOT" -maxdepth 1 -type d -name '????-??-??' | sort -r | tail -n +$((KEEP_DAYS + 1)) | while read -r old; do
   rm -rf "$old"
   echo "$(date -Iseconds) pruned $old" >> "$BACKUP_ROOT/backup.log"
 done
