@@ -433,7 +433,29 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .radio-list label:hover { background: var(--paper-2); }
 
 /* ── INDEX ───────────────────────────── */
-.index-kinds { display: flex; flex-direction: column; gap: 28px; }
+.index-kinds { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--rule); }
+.tree-heading-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px 2px;
+  margin-top: 10px;
+  border-bottom: 1px dashed var(--rule);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  position: relative;
+}
+.tree-heading-row:first-child { margin-top: 0; }
+.tree-heading-row .tree-heading-label { cursor: pointer; }
+.tree-heading-row .tree-heading-label:hover { color: var(--accent); }
+.tree-heading-row .tree-actions { opacity: 0; pointer-events: none; transition: opacity var(--t); }
+.tree-heading-row:hover .tree-actions { opacity: 1; pointer-events: auto; }
+.tree-heading-children { margin-left: 10px; padding-left: 6px; border-left: 1px solid var(--rule); }
+.tree-heading-empty { font-style: italic; color: var(--ink-faint); padding: 1px 8px; font-size: 11px; }
 .kind-block h3 {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -449,31 +471,33 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .kind-block h3 .count { color: var(--ink-faint); font-weight: 400; }
 
 .tree-row {
-  padding: 6px 8px;
+  padding: 11px 10px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border-radius: var(--r);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 14px;
+  border-bottom: 1px solid var(--rule-soft);
   transition: background var(--t);
-  min-height: 32px;
   overflow: hidden;
 }
 .tree-row:hover { background: var(--paper-2); }
 .tree-row.expanded { background: var(--paper-2); }
 .tree-chevron {
-  width: 16px; height: 16px;
+  width: 14px; height: 14px;
   display: flex; align-items: center; justify-content: center;
   color: var(--ink-faint);
   transition: transform var(--t), color var(--t);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 1;
 }
 .tree-chevron.open { transform: rotate(90deg); color: var(--accent); }
 .tree-label {
   cursor: pointer;
   color: var(--ink);
-  font-size: 13.5px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -482,10 +506,12 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .tree-label.repeat { color: var(--ink-faint); font-style: italic; }
 .tree-counts {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1;
   color: var(--ink-faint);
   letter-spacing: 0.02em;
 }
+.tree-actions .btn { line-height: 1; }
 .tree-row { position: relative; }
 .tree-actions {
   position: absolute;
@@ -507,14 +533,14 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .tree-actions .btn:hover { border-color: var(--rule); }
 
 .tree-children {
-  margin-left: 18px;
-  padding-left: 10px;
+  margin-left: 10px;
+  padding-left: 6px;
   border-left: 1px solid var(--rule);
 }
 
 .tree-panel {
-  margin: 4px 0 12px 26px;
-  padding: 12px 16px;
+  margin: 2px 0 8px 22px;
+  padding: 8px 12px;
   border: 1px solid var(--rule);
   border-radius: var(--r);
   background: var(--paper);
@@ -1230,7 +1256,7 @@ function inlineInput({ value, onSave, placeholder = '—', mono = false, size = 
 }
 
 // ─── Typeahead ─────────────────────────────
-function openTypeahead({ anchor, kinds = null, onPick, placeholder = 'Search…' }) {
+function openTypeahead({ anchor, kinds = null, onPick, placeholder = 'Search…', allowCreate = false, createLabel = 'Create' }) {
   const rect = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : { left: 200, top: 200, bottom: 220 };
   const pop = h('div', { class: 'typeahead-pop' });
   const input = h('input', { class: 'input', placeholder });
@@ -1245,13 +1271,29 @@ function openTypeahead({ anchor, kinds = null, onPick, placeholder = 'Search…'
   let active = 0;
   let rows = [];
   let timer = null;
+  let lastQuery = '';
   const close = () => { pop.remove(); document.removeEventListener('mousedown', away); };
   const away = (e) => { if (!pop.contains(e.target) && e.target !== anchor) close(); };
   setTimeout(() => document.addEventListener('mousedown', away), 0);
 
+  // Build the effective row list including an optional synthetic "+ create" row
+  // when allowCreate is set and the typed label has no exact match.
+  function effectiveRows() {
+    const out = rows.slice();
+    if (allowCreate && lastQuery.trim()) {
+      const typed = lastQuery.trim();
+      const exact = rows.some(r => (r.label || '').toLowerCase() === typed.toLowerCase());
+      if (!exact) {
+        out.push({ _create: true, label: typed, kind: (kinds && kinds[0]) || 'new' });
+      }
+    }
+    return out;
+  }
+
   async function query(q) {
+    lastQuery = q || '';
     list.innerHTML = '';
-    if (!q || q.length < 1) return;
+    if (!q || q.length < 1) { rows = []; active = 0; renderList(); return; }
     const safe = q.replace(/['"*]/g, ' ').trim();
     try {
       const res = await api(`/api/index/search?q=${encodeURIComponent(safe)}`);
@@ -1264,22 +1306,29 @@ function openTypeahead({ anchor, kinds = null, onPick, placeholder = 'Search…'
   }
   function renderList() {
     list.innerHTML = '';
-    rows.forEach((r, i) => {
-      const row = h('div', { class: 'typeahead-row' + (i === active ? ' active' : '') },
-        h('span', null, r.label),
-        h('span', { class: 'kind' }, r.kind.replace('_', ' ')),
-      );
+    const eff = effectiveRows();
+    eff.forEach((r, i) => {
+      const row = r._create
+        ? h('div', { class: 'typeahead-row create' + (i === active ? ' active' : '') },
+            h('span', null, `+ ${createLabel} "${r.label}"`),
+            h('span', { class: 'kind' }, 'new'),
+          )
+        : h('div', { class: 'typeahead-row' + (i === active ? ' active' : '') },
+            h('span', null, r.label),
+            h('span', { class: 'kind' }, (r.kind || '').replace('_', ' ')),
+          );
       row.addEventListener('click', () => { onPick(r); close(); });
       list.appendChild(row);
     });
-    if (!rows.length) list.appendChild(h('div', { class: 'typeahead-row faint', style: { cursor: 'default' } }, 'No matches.'));
+    if (!eff.length) list.appendChild(h('div', { class: 'typeahead-row faint', style: { cursor: 'default' } }, 'No matches.'));
   }
   input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => query(input.value), 140); });
   input.addEventListener('keydown', e => {
+    const eff = effectiveRows();
     if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, rows.length - 1); renderList(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, eff.length - 1); renderList(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); renderList(); }
-    else if (e.key === 'Enter') { if (rows[active]) { onPick(rows[active]); close(); } }
+    else if (e.key === 'Enter') { if (eff[active]) { onPick(eff[active]); close(); } }
   });
 }
 
@@ -1896,16 +1945,52 @@ function showBacklogCard() {
 }
 
 // ─── INDEX ─────────────────────────────────
+// Two sections: "Contents" (front-of-book — collections & artifacts, grouped
+// by heading when one is set) and "Indexes" (back-of-book, alphabetical).
+// Headings themselves don't get their own tab: they act like sub-sections
+// inside the Collections and Artifacts tabs, same way a notebook's TOC just
+// indents items under a heading rather than storing headings separately.
 const KIND_ORDER = [
+  // Front-of-book (Table of Contents):
   ['collection', 'Collections'],
+  ['artifact', 'Artifacts'],
+  // Back-of-book (Indexes):
   ['person', 'People'],
   ['topic', 'Topics'],
-  ['book', 'Books'],
-  ['artifact', 'Artifacts'],
-  ['reference', 'References'],
   ['scripture', 'Scripture'],
-  ['user_index', 'Custom'],
+  ['book', 'Books'],
+  ['reference', 'References'],
+  ['user_index', 'Indexes'],
 ];
+const TOC_KINDS = new Set(['collection', 'artifact']);
+
+// Canonical order of the books of the Bible (Protestant canon). Scripture rows
+// carry a `meta.book` field (e.g. "Nehemiah", "1 Corinthians"); auto-headings
+// in the Scripture index group rows by book, ordered by this list.
+const BIBLE_BOOK_ORDER = [
+  'Genesis','Exodus','Leviticus','Numbers','Deuteronomy',
+  'Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings',
+  '1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther',
+  'Job','Psalms','Psalm','Proverbs','Ecclesiastes','Song of Solomon','Song of Songs',
+  'Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel',
+  'Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi',
+  'Matthew','Mark','Luke','John','Acts',
+  'Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians',
+  '1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon',
+  'Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation',
+];
+const BIBLE_BOOK_INDEX = new Map(BIBLE_BOOK_ORDER.map((b, i) => [b.toLowerCase(), i]));
+
+// Derive the book name for a scripture row. Prefer the server-provided
+// `meta.book`; fall back to parsing the leading words of the canonical label
+// (everything before the first chapter/verse digit).
+function scriptureBookOf(node) {
+  const m = node.meta?.book;
+  if (m && m.trim()) return m.trim();
+  const label = node.label || '';
+  const match = label.match(/^([1-3]\s+)?[A-Za-z][A-Za-z\s]*?(?=\s+\d)/);
+  return (match ? match[0] : label).trim() || 'Unknown';
+}
 
 const indexNodeRefs = new Map(); // `${kind}:${id}` -> { row, expand }
 let activeIndexKind = null;
@@ -1947,14 +2032,187 @@ async function renderIndex(focusKind, focusId) {
     activeIndexKind = kind;
     tabsEl.querySelectorAll('.kind-tab').forEach(t => t.classList.toggle('active', t.dataset.kind === kind));
 
+    // Per-tab toolbar: collections / artifacts get "+ New heading" so the user
+    // can drop a new TOC heading inline without leaving the tab.
+    const toolbar = h('div', { style: { display: 'flex', gap: '6px', margin: '4px 0 6px' } });
+    if (TOC_KINDS.has(kind)) {
+      const btn = h('button', { class: 'btn sm' }, '+ New heading');
+      btn.addEventListener('click', async () => {
+        const label = prompt('Heading label?');
+        if (!label || !label.trim()) return;
+        try {
+          await api('/api/headings', 'POST', { label: label.trim() });
+          invalidateIndexCache();
+          mainInner.innerHTML = '';
+          renderIndex(kind);
+        } catch (err) { toast(err.message, 'err'); }
+      });
+      toolbar.appendChild(btn);
+    }
+    if (toolbar.children.length) host.appendChild(toolbar);
+
+    // TOC rendering (collections / artifacts): headings become indented sub-
+    // sections at the top of the tab, each with its own children beneath. Any
+    // row without a heading parent falls back into the "Unfiled" list below —
+    // so every collection/artifact is reachable in one place, and grouping
+    // feels like indenting a notebook TOC, not like switching tabs.
+    if (TOC_KINDS.has(kind)) {
+      const rows = byKind[kind] || [];
+      const headings = (byKind['heading'] || cachedIndexTree.kinds.find(k => k.kind === 'heading')?.active || []);
+
+      const inHeading = new Set();
+      let anyHeadingRendered = false;
+      for (const heading of headings) {
+        // From the heading tree, take only children matching the current kind.
+        const kids = (heading.children || []).filter(c => c.kind === kind);
+        kids.forEach(c => inHeading.add(c.id));
+        if (!kids.length && heading.archivedAt) continue;
+        anyHeadingRendered = true;
+        renderHeadingGroup(host, heading, kind, kids);
+      }
+
+      // Unfiled — collections / artifacts that don't live under any heading.
+      const unfiled = rows.filter(r => !inHeading.has(r.id));
+      if (unfiled.length) {
+        if (anyHeadingRendered) {
+          host.appendChild(h('div', { class: 'tree-heading-row' },
+            h('span', null, ''),
+            h('span', { class: 'tree-heading-label', style: { cursor: 'default' } }, 'Unfiled'),
+            h('span', null, ''),
+          ));
+        }
+        for (const node of unfiled) host.appendChild(renderTreeRow(kind, node, 0));
+      }
+      if (!anyHeadingRendered && !unfiled.length) {
+        host.appendChild(h('div', { class: 'empty' }, 'Nothing here yet.'));
+      }
+      if (focusId && kind === focusKind) setTimeout(() => jumpToIndexNode(focusKind, focusId, true), 50);
+      return;
+    }
+
+    // Back-of-book kinds render alphabetically, flat.
     const roots = byKind[kind] || [];
     const topLevel = roots.filter(r => !r.parents || r.parents.length === 0);
-    const display = topLevel.length ? topLevel : roots;
+    let display = topLevel.length ? topLevel : roots;
+
+    // Scripture → auto-group by Bible book in canonical order, rows within
+    // each book ordered by chapter, then verse_start.
+    if (kind === 'scripture') {
+      if (!display.length) { host.appendChild(h('div', { class: 'empty' }, 'Nothing here yet.')); return; }
+      const byBook = new Map();
+      for (const node of display) {
+        const book = scriptureBookOf(node);
+        if (!byBook.has(book)) byBook.set(book, []);
+        byBook.get(book).push(node);
+      }
+      const sortedBooks = [...byBook.keys()].sort((a, b) => {
+        const ai = BIBLE_BOOK_INDEX.get(a.toLowerCase());
+        const bi = BIBLE_BOOK_INDEX.get(b.toLowerCase());
+        if (ai != null && bi != null) return ai - bi;
+        if (ai != null) return -1;
+        if (bi != null) return 1;
+        return a.localeCompare(b, undefined, { sensitivity: 'base' });
+      });
+      for (const book of sortedBooks) {
+        renderAutoHeadingGroup(host, book, kind, byBook.get(book).sort((a, b) => {
+          const ac = a.meta?.chapter ?? 0, bc = b.meta?.chapter ?? 0;
+          if (ac !== bc) return ac - bc;
+          const av = a.meta?.verse_start ?? 0, bv = b.meta?.verse_start ?? 0;
+          return av - bv;
+        }));
+      }
+      if (focusId && kind === focusKind) setTimeout(() => jumpToIndexNode(focusKind, focusId, true), 50);
+      return;
+    }
+
+    // Books → auto-group by author (alphabetical by author, alphabetical by
+    // title within). Books without an author land in "Unknown author".
+    if (kind === 'book') {
+      if (!display.length) { host.appendChild(h('div', { class: 'empty' }, 'Nothing here yet.')); return; }
+      const byAuthor = new Map();
+      for (const node of display) {
+        const author = (node.meta?.author_label || '').trim() || 'Unknown author';
+        if (!byAuthor.has(author)) byAuthor.set(author, []);
+        byAuthor.get(author).push(node);
+      }
+      const sortedAuthors = [...byAuthor.keys()].sort((a, b) => {
+        if (a === 'Unknown author') return 1;
+        if (b === 'Unknown author') return -1;
+        return a.localeCompare(b, undefined, { sensitivity: 'base' });
+      });
+      for (const author of sortedAuthors) {
+        renderAutoHeadingGroup(host, author, kind, byAuthor.get(author).sort((a, b) =>
+          (a.label || '').localeCompare(b.label || '', undefined, { sensitivity: 'base' })
+        ));
+      }
+      if (focusId && kind === focusKind) setTimeout(() => jumpToIndexNode(focusKind, focusId, true), 50);
+      return;
+    }
+
+    display = [...display].sort((a, b) =>
+      (a.label || a.title || a.canonical || '').localeCompare(b.label || b.title || b.canonical || '', undefined, { sensitivity: 'base' })
+    );
     if (!display.length) { host.appendChild(h('div', { class: 'empty' }, 'Nothing here yet.')); return; }
     for (const node of display) host.appendChild(renderTreeRow(kind, node, 0));
 
     if (focusId && kind === focusKind) setTimeout(() => jumpToIndexNode(focusKind, focusId, true), 50);
   };
+
+  // Auto-generated heading (scripture → Bible book, book → author). Reuses the
+  // .tree-heading-row styling from the TOC headings, minus the row-level edit
+  // actions (the heading is derived, not a user-editable entity).
+  function renderAutoHeadingGroup(host, label, kind, kids) {
+    const row = h('div', { class: 'tree-heading-row' });
+    row.appendChild(h('span', null, ''));
+    row.appendChild(h('span', { class: 'tree-heading-label', style: { cursor: 'default' } }, label));
+    row.appendChild(h('span', null, ''));
+    host.appendChild(row);
+    const kidsHost = h('div', { class: 'tree-heading-children' });
+    for (const c of kids) kidsHost.appendChild(renderTreeRow(kind, c, 1));
+    host.appendChild(kidsHost);
+  }
+
+  // Renders one heading as a section label with its children (of the current
+  // kind) indented beneath. Heading label itself has inline rename/merge/delete
+  // actions that appear on hover.
+  function renderHeadingGroup(host, heading, kind, kids) {
+    const label = heading.label || '(untitled)';
+    const row = h('div', { class: 'tree-heading-row' });
+    row.appendChild(h('span', null, ''));
+    const labelEl = h('span', { class: 'tree-heading-label' }, label);
+    labelEl.addEventListener('click', () => openEntityDetail('heading', heading));
+    row.appendChild(labelEl);
+
+    const actions = h('div', { class: 'tree-actions' });
+    actions.appendChild(buildActionBtn('Rename', () => renameNode('heading', heading)));
+    actions.appendChild(buildActionBtn('Merge',  () => mergeNode('heading', heading)));
+    actions.appendChild(buildActionBtn('×',      () => archiveOrDeleteHeading(heading)));
+    row.appendChild(actions);
+    host.appendChild(row);
+
+    const kidsHost = h('div', { class: 'tree-heading-children' });
+    if (!kids.length) {
+      kidsHost.appendChild(h('div', { class: 'tree-heading-empty' }, 'empty'));
+    } else {
+      // Alphabetical inside the heading, matching notebook TOC convention.
+      const sorted = [...kids].sort((a, b) =>
+        (a.label || '').localeCompare(b.label || '', undefined, { sensitivity: 'base' })
+      );
+      for (const c of sorted) kidsHost.appendChild(renderTreeRow(kind, c, 1));
+    }
+    host.appendChild(kidsHost);
+  }
+
+  async function archiveOrDeleteHeading(heading) {
+    if (!confirm(`Delete heading "${heading.label}"? Items filed under it keep their other parents and fall back to Unfiled.`)) return;
+    try {
+      await api(`/api/index/heading/${heading.id}/delete`, 'POST', {});
+      toast('deleted', 'ok');
+      invalidateIndexCache();
+      mainInner.innerHTML = '';
+      renderIndex(activeIndexKind);
+    } catch (err) { toast(err.message, 'err'); }
+  }
 
   for (const [kind, label] of availableTabs) {
     const count = (byKind[kind] || []).length;
@@ -1983,6 +2241,9 @@ function renderTreeRow(kind, node, depth) {
     const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
     actions.append(renameBtn, mergeBtn, parentBtn);
     if (kind === 'collection' || kind === 'artifact') {
+      // TOC heading assignment — distinct from the topic-parent ↑ above.
+      const headingBtn = buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node));
+      actions.append(headingBtn);
       actions.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
     }
   }
@@ -2156,6 +2417,26 @@ function renderConnectionsPanel(panel, kind, node, conn) {
 
   if (!hasAny && !conn.pages_count) {
     panel.appendChild(h('div', { class: 'soft', style: { fontSize: '11.5px', marginTop: '6px' } }, 'No connections yet.'));
+  }
+
+  // Cross-kind "Find related" — only for rows that can be the FROM side of a
+  // cross-kind link (collection / artifact / reference / daily_log).
+  if (['collection', 'artifact', 'reference', 'daily_log'].includes(kind)) {
+    const btn = h('button', { class: 'btn sm' }, 'Find related');
+    btn.addEventListener('click', (e) => { e.stopPropagation(); findRelatedForNode(kind, node.id, btn); });
+    const when = node.links_classified_at ? `last run ${new Date(node.links_classified_at).toLocaleString()}` : 'never run';
+    panel.appendChild(h('div', { style: { marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' } },
+      btn,
+      h('span', { class: 'soft', style: { fontSize: '11px' } }, when),
+    ));
+  }
+
+  // Per-user_index noise filter (Hidden / Forced in / Rebuild).
+  if (kind === 'user_index') {
+    panel.appendChild(h('div', { class: 'section-label', style: { marginTop: '12px' } }, 'Noise filter'));
+    const host = h('div');
+    panel.appendChild(host);
+    renderUserIndexFiltersInto(host, node.id);
   }
 }
 
@@ -2397,6 +2678,104 @@ function setParent(kind, node, anchorBtn) {
       } catch (err) { toast(err.message, 'err'); }
     },
   });
+}
+
+// Attach a collection or artifact to a heading. Multi-parent is allowed, so
+// the API call is additive; remove-from-heading is a separate chip click in
+// the connections panel. Uses the same typeahead as other parent pickers, but
+// restricted to the heading kind; if the user types a label not in the list
+// and accepts, we create a new heading and attach to it.
+async function setHeadingForNode(kind, node) {
+  openTypeahead({
+    anchor: null,
+    kinds: ['heading'],
+    placeholder: 'Find or create a heading…',
+    allowCreate: true,
+    createLabel: 'New heading',
+    onPick: async (r) => {
+      try {
+        let headingId = r.id;
+        if (r._create) {
+          const created = await api('/api/headings', 'POST', { label: r.label });
+          headingId = created.id;
+        }
+        await api(`/api/index/${kind}/${node.id}/parent`, 'POST', {
+          parent_kind: 'heading', parent_id: headingId,
+        });
+        toast('filed under heading', 'ok');
+        invalidateIndexCache();
+        mainInner.innerHTML = '';
+        renderIndex();
+      } catch (err) { toast(err.message, 'err'); }
+    },
+  });
+}
+
+// Cross-kind "Find related": bypass hash-skip, classify now, toast the counts.
+async function findRelatedForNode(kind, id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Finding…'; }
+  try {
+    const r = await api(`/api/index/${kind}/${id}/find-related`, 'POST', {});
+    toast(`+${r.linked || 0} links, ${r.proposals || 0} proposals`, 'ok');
+    invalidateIndexCache();
+  } catch (err) { toast(err.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Find related'; } }
+}
+
+// Load & render the noise-filter UI for a user_index: hidden (excluded) entries
+// with a reason badge + a force-include button; forced entries with remove
+// buttons. Mounts into a host div the caller provides.
+async function renderUserIndexFiltersInto(host, id) {
+  host.innerHTML = '<div class="soft" style="font-size:12px">loading…</div>';
+  let data;
+  try { data = await api(`/api/user-indexes/${id}/exclusions`); }
+  catch (err) { host.innerHTML = ''; host.appendChild(h('div', { class: 'soft' }, err.message)); return; }
+  host.innerHTML = '';
+
+  const rebuildBtn = h('button', { class: 'btn sm' }, 'Rebuild index');
+  rebuildBtn.addEventListener('click', async () => {
+    rebuildBtn.disabled = true; rebuildBtn.textContent = 'Rebuilding…';
+    try {
+      const r = await api(`/api/user-indexes/${id}/rebuild`, 'POST', {});
+      toast(`rebuilt — ${r.entries_count || 0} entries, ${r.excluded_count || 0} hidden`, 'ok');
+      renderUserIndexFiltersInto(host, id);
+    } catch (err) { toast(err.message, 'err'); }
+    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = 'Rebuild index'; }
+  });
+  host.appendChild(h('div', { style: { marginBottom: '8px' } }, rebuildBtn));
+
+  const section = (title, rows, actionLabel, onAction) => {
+    if (!rows.length) return;
+    host.appendChild(h('div', { class: 'section-label' }, title));
+    const list = h('div', { class: 'conn-list' });
+    for (const row of rows) {
+      const text = `${row.label || row.entity_id}` + (row.reason ? ` · ${row.reason.replace('_', ' ')}` : '');
+      const chip = h('span', { class: `chip kind-${row.entity_kind}` }, text);
+      const btn = h('button', { class: 'btn-ghost', style: { marginLeft: '4px', fontSize: '10px' } }, actionLabel);
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try { await onAction(row); renderUserIndexFiltersInto(host, id); }
+        catch (err) { toast(err.message, 'err'); }
+      });
+      const wrap = h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '2px' } }, chip, btn);
+      list.appendChild(wrap);
+    }
+    host.appendChild(list);
+  };
+
+  section('Hidden (auto)', data.auto || [], 'Include', (row) =>
+    api(`/api/user-indexes/${id}/inclusions`, 'POST', { entity_kind: row.entity_kind, entity_id: row.entity_id })
+  );
+  section('Hidden (blocked by you)', data.user || [], 'Unblock', (row) =>
+    api(`/api/user-indexes/${id}/exclusions/${row.id}`, 'DELETE')
+  );
+  section('Forced in', data.inclusions || [], '×', (row) =>
+    api(`/api/user-indexes/${id}/inclusions/${row.id}`, 'DELETE')
+  );
+
+  if (!(data.auto || []).length && !(data.user || []).length && !(data.inclusions || []).length) {
+    host.appendChild(h('div', { class: 'soft', style: { fontSize: '11.5px', marginTop: '6px' } }, 'No filter rules yet. Rebuild the index to populate.'));
+  }
 }
 
 async function jumpToIndexNode(kind, id, alreadyOnIndex = false) {

@@ -7,6 +7,8 @@ module.exports = {
   parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, probePageHeader,
   // Phase 6 — unified index / AI-described indexes:
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
+  // Phase 7 — cross-kind auto-linking + topical (back-of-book) index rebuild:
+  classifyRowForCrossKind, generateTopicalIndexEntries,
 };
 ```
 
@@ -131,6 +133,50 @@ Must never throw — swallows everything and returns `[]`. Callers use `setImmed
 Rendered as acceptable cards under "My Indexes → Suggestions". Accepting one calls `POST /api/user-indexes/ai/accept` which creates the root user_index and seeds `index_parents` links to the candidate children — same backbone as `generateIndexStructure`, just pre-populated with structural children rather than newly-generated leaf slots.
 
 Errors return `[]` — suggestions are opportunistic.
+
+### `classifyRowForCrossKind({ fromRow, candidates })` — cross-kind auto-linker
+
+`gemini-2.5-flash`, `temperature=0.1`, `maxOutputTokens=1024`. Takes ONE "from" row (kind ∈ `collection|artifact|reference|daily_log`) plus up to 40 candidate rows of the same kind family, returns which candidates are substantively related and at what confidence.
+
+```
+Input:
+  fromRow:    { kind, label, description }
+  candidates: [{ kind, id, label, description }]   // up to 40, pre-ranked by bag-of-words overlap
+
+Output:
+  { matches: [{ kind, id, confidence: 0..1, role_summary }] }
+```
+
+Consumer: `classifyRowForCrossKindInBackground` in server.js. Confidence ≥ 0.75 → insert into `links` with `role_summary`. 0.50–0.74 → dedup'd `backlog_items kind='filing'`. < 0.50 → dropped.
+
+Triggered from three paths: (1) ingest tail — `setImmediate` for every newly-created collection/artifact/reference inside `savePageFromParse`; (2) PATCH handlers — after a content-hash change on the title/description; (3) on-demand `POST /api/index/:kind/:id/find-related`.
+
+`role_summary` flows into `links.role_summary` and is the primary caption on cross-kind tiles — it MUST be written from the FROM row's perspective, in the AI's words, ≤18 words. System prompt restates the pointer-summary invariant. Errors return `{matches:[]}` — the call is best-effort.
+
+### `generateTopicalIndexEntries({ indexTitle, indexDescription, candidates, totalPages })` — back-of-book rebuild
+
+`gemini-2.5-flash`, `temperature=0.1`, `maxOutputTokens=4096`. Given an AI user-index's scope and a pool of candidate entities (person/topic/scripture/collection/artifact/reference), partitions them into entries (belong in the index) and rejections (noise or off-scope).
+
+```
+Input:
+  indexTitle, indexDescription
+  candidates: [{ kind, id, label, page_count }]   // up to 200
+  totalPages: <int — for noise judgment>
+
+Output:
+  {
+    entries:  [{ kind, id, role_summary, why_included }],
+    rejected: [{ kind, id, reason }]
+  }
+```
+
+Consumer: `POST /api/user-indexes/:id/rebuild` in server.js. A server-side pre-filter already drops anything whose page-mention count exceeds `NOISE_FRACTION=0.25` of the vault; this call handles context-sensitive noise (e.g. "prayer" may be noise in a theology index but signal in a spiritual-disciplines index). Rejections get written to `user_index_exclusions` with `reason='auto_high_frequency'`. User-blocked exclusions and forced inclusions are applied outside this call.
+
+System prompt explicitly: *"An entry is NOISE if it does not narrow the index — e.g. 'Bible' in a theology index touches every page; reject. 'Incarnation' narrows; accept. Always honor the provided indexDescription scope."* Pointer-summary restated.
+
+`generateIndexStructure` also had its system prompt augmented with: *"Do not name slots after entities that appear on the majority of pages in the vault."* Preventive — keeps noise out of the AI-suggested structure before it ever reaches the user.
+
+Errors return `{entries:[], rejected:[]}` — the server falls back to "accept all eligibles" so the rebuild still produces an index.
 
 ## Invariants across all prompts
 

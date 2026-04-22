@@ -673,6 +673,8 @@ const INDEX_STRUCTURE_SYSTEM = `You are designing a hierarchical index for a per
 
 The notebook is sovereign — NEVER quote the user's prose. All labels and descriptions you produce must be YOUR words, not theirs.
 
+Do not name slots after entities that appear on the majority of pages in the vault (e.g. "God" or "Bible" in a theology index). Those are background, not signal — they would collect every page and narrow nothing. Favor specific sub-topics that genuinely partition the index's scope.
+
 Return ONLY valid JSON, no markdown fences, no commentary.`;
 
 const INDEX_STRUCTURE_PROMPT = `The user wants a new index for their notebook, described as:
@@ -849,7 +851,137 @@ Return JSON:
   }
 }
 
+// --- Cross-kind auto-linking (collection ↔ artifact ↔ reference ↔ daily_log) ---
+
+const CROSS_KIND_SYSTEM = `You are judging whether two notebook "index rows" are substantively related.
+
+Index rows come in four kinds: collection (user-grouped pages on one topic), artifact (filed physical material — sermons, handouts, SOPs), reference (external resource — URL, article, book, podcast), daily_log (a dated journal entry).
+
+A link means: when the user is looking at one of these, seeing the other will actually help them. Shared proper noun does NOT imply link. Two dated entries on the same day do NOT imply link. Two sermons in the same series DO imply link. An article about habit formation and a collection titled "Habits" DO imply link.
+
+The notebook is sovereign — NEVER quote the user's prose verbatim. Your role_summary values must be YOUR words (max 18 words) describing WHY the two rows belong together, not transcriptions of either row.
+
+Return ONLY valid JSON, no markdown fences.`;
+
+async function classifyRowForCrossKind({ fromRow, candidates }) {
+  const fromBlock = `KIND: ${fromRow.kind}\nLABEL: ${fromRow.label || '(no label)'}\nDESCRIPTION: ${fromRow.description || '(none)'}`;
+  const candidatesBlock = (candidates || []).slice(0, 40).map((c, i) =>
+    `[${i + 1}] kind=${c.kind} id=${c.id}\n    label: ${c.label || '(no label)'}\n    description: ${c.description || '(none)'}`
+  ).join('\n\n');
+
+  const userText = `FROM row (the one we're looking for related material for):
+
+${fromBlock}
+
+CANDIDATE rows (up to 40, pre-filtered by keyword overlap):
+
+${candidatesBlock || '(none)'}
+
+For each candidate that is substantively related to the FROM row, return an entry. Skip candidates that share only surface keywords.
+
+Rules:
+- confidence ∈ [0.0, 1.0]. Use ≥0.80 only when the relationship is unmistakable. 0.50–0.74 for "probably related, user should confirm". Below 0.50 — skip entirely.
+- role_summary MUST explain (in your words, max 18 words) why the two rows belong together, oriented from the FROM row's perspective. Example for a collection "Sabbath Rhythms" linked to an artifact "Sermon: Mark 2 Sabbath": "Sermon handout develops the theology underlying these Sabbath practice notes."
+
+Return JSON:
+{
+  "matches": [
+    { "kind": "<candidate kind>", "id": "<candidate id>", "confidence": <0.0-1.0>, "role_summary": "<why related>" }
+  ]
+}
+
+If nothing fits, return {"matches": []}.`;
+
+  try {
+    const response = await genai.models.generateContent({
+      model: CHAT_MODEL,
+      contents: [{ role: 'user', parts: [{ text: userText }] }],
+      config: {
+        systemInstruction: CROSS_KIND_SYSTEM,
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+        maxOutputTokens: 1024,
+      },
+    });
+    const raw = (response.text || '').trim();
+    if (!raw) return { matches: [] };
+    const json = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
+    const parsed = JSON.parse(json);
+    return { matches: Array.isArray(parsed.matches) ? parsed.matches : [] };
+  } catch (err) {
+    console.warn('classifyRowForCrossKind failed:', err.message);
+    return { matches: [] };
+  }
+}
+
+// --- Topical (back-of-book) user-index rebuild ---
+
+const TOPICAL_ENTRIES_SYSTEM = `You are curating a topical back-of-book index for a personal notebook.
+
+The user has created a topical index (e.g. "theology", "spiritual disciplines"). Your job: given a pool of candidate entries (people, topics, scripture, collections, artifacts, references), decide which ones genuinely belong — and which are noise.
+
+An entry is NOISE if it does not narrow the index. Example: "Bible" or "God" in a theology index appears on every theological page and therefore partitions nothing — reject. "Incarnation" narrows and is signal — accept. Always honor the provided indexDescription as the scope.
+
+The notebook is sovereign — NEVER quote the user's prose. All role_summary and why_included / reason fields are YOUR words (≤18 words each).
+
+Return ONLY valid JSON, no markdown fences.`;
+
+async function generateTopicalIndexEntries({ indexTitle, indexDescription, candidates, totalPages }) {
+  const candBlock = (candidates || []).slice(0, 200).map((c, i) =>
+    `[${i + 1}] kind=${c.kind} id=${c.id} label="${c.label || ''}" pages=${c.page_count || 0}`
+  ).join('\n');
+
+  const userText = `Index title: "${indexTitle || ''}"
+Index description / scope: ${indexDescription || '(no description — use the title as the scope)'}
+Total pages in vault: ${totalPages || 'unknown'}
+
+Candidate entries (already pre-filtered for surface overlap):
+
+${candBlock || '(none)'}
+
+For each candidate, decide:
+- ENTRY — belongs in this index because it narrows the scope meaningfully.
+- REJECT — doesn't belong, or is omnipresent noise that would not help the user find anything specific.
+
+Rules:
+- Reject anything that appears on a majority of pages for a vault-wide theme — those are background, not signal.
+- Reject candidates that only share a surface keyword with the index title but are off-scope (e.g. "faithful" the adjective in a dog-breeds collection shouldn't land in a theology index).
+- Each ENTRY needs a role_summary (your words, ≤18 words) explaining WHY it's in this index from the index's perspective. E.g. for "Atonement" in a theology index: "Centers the index's treatment of reconciliation, substitution, and the cross's scope."
+- Each REJECT needs a short reason (≤12 words).
+
+Return JSON:
+{
+  "entries":  [{ "kind": "<kind>", "id": "<id>", "role_summary": "<why in>", "why_included": "<1-line rationale>" }],
+  "rejected": [{ "kind": "<kind>", "id": "<id>", "reason": "<why out>" }]
+}`;
+
+  try {
+    const response = await genai.models.generateContent({
+      model: CHAT_MODEL,
+      contents: [{ role: 'user', parts: [{ text: userText }] }],
+      config: {
+        systemInstruction: TOPICAL_ENTRIES_SYSTEM,
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+        maxOutputTokens: 4096,
+      },
+    });
+    const raw = (response.text || '').trim();
+    if (!raw) return { entries: [], rejected: [] };
+    const json = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
+    const parsed = JSON.parse(json);
+    return {
+      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      rejected: Array.isArray(parsed.rejected) ? parsed.rejected : [],
+    };
+  } catch (err) {
+    console.warn('generateTopicalIndexEntries failed:', err.message);
+    return { entries: [], rejected: [] };
+  }
+}
+
 module.exports = {
   parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, probePageHeader,
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
+  classifyRowForCrossKind, generateTopicalIndexEntries,
 };
