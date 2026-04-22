@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'foxed.db');
+const DB_PATH = process.env.TEST_DB_PATH || path.join(DATA_DIR, 'foxed.db');
 
 fs.mkdirSync(path.join(DATA_DIR, 'scans'), { recursive: true });
 
@@ -392,6 +392,74 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS ix_index_entries_page           ON index_entries(page_id);
 `);
 
+// =============================================================================
+// Indexing sharpen — TOC vs back-of-book
+// =============================================================================
+// Headings group collections + artifacts into a front-of-book TOC. Multi-parent
+// (one collection under many headings) and multi-level nesting (heading under
+// heading) both supported — they flow through the existing index_parents DAG
+// and its cycle-guard in setIndexParent().
+db.exec(`
+  CREATE TABLE IF NOT EXISTS headings (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    description TEXT,
+    archived_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_ci ON headings(label COLLATE NOCASE);
+`);
+
+// Exclusions / inclusions for AI-curated user_indexes. An excluded entry is
+// invisible in the index listing; an included entry bypasses the noise filter.
+// Exclusions carry `reason` so the UI can distinguish auto vs. user blocks.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_index_exclusions (
+    id TEXT PRIMARY KEY,
+    user_index_id TEXT NOT NULL REFERENCES user_indexes(id),
+    entity_kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_uix_excl
+    ON user_index_exclusions(user_index_id, entity_kind, entity_id);
+
+  CREATE TABLE IF NOT EXISTS user_index_inclusions (
+    id TEXT PRIMARY KEY,
+    user_index_id TEXT NOT NULL REFERENCES user_indexes(id),
+    entity_kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_uix_incl
+    ON user_index_inclusions(user_index_id, entity_kind, entity_id);
+`);
+
+// content_hash + links_classified_at let the cross-kind auto-link classifier
+// skip rows whose semantic body (title + description) hasn't changed since the
+// last sweep. NULL links_classified_at means "never classified."
+{
+  const cols = db.pragma('table_info(collections)').map(c => c.name);
+  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE collections ADD COLUMN content_hash TEXT');
+  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE collections ADD COLUMN links_classified_at TEXT');
+}
+{
+  const cols = db.pragma('table_info(artifacts)').map(c => c.name);
+  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE artifacts ADD COLUMN content_hash TEXT');
+  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE artifacts ADD COLUMN links_classified_at TEXT');
+}
+{
+  const cols = db.pragma('table_info(reference_materials)').map(c => c.name);
+  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE reference_materials ADD COLUMN content_hash TEXT');
+  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE reference_materials ADD COLUMN links_classified_at TEXT');
+}
+{
+  const cols = db.pragma('table_info(daily_logs)').map(c => c.name);
+  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
+  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
+}
+
 // Dedupe links after a merge moves (to_type,to_id) pointers. Keeps the earliest
 // row per (from_type, from_id, to_type, to_id, COALESCE(role,'')).
 function dedupeLinks() {
@@ -468,6 +536,7 @@ function deduplicatePages() {
 // Every index kind recognized by the tree. Extended map of the older
 // _ENTITY_KIND_MAP — adds artifact, reference, user_index.
 const _INDEX_KIND_TABLE = {
+  heading:     { table: 'headings',             labelCol: 'label',     archiveCol: 'archived_at' },
   collection:  { table: 'collections',         labelCol: 'title',     archiveCol: 'archived_at' },
   book:        { table: 'books',               labelCol: 'title',     archiveCol: 'archived_at' },
   artifact:    { table: 'artifacts',           labelCol: 'title',     archiveCol: 'archived_at' },
@@ -496,7 +565,19 @@ function lookupIndexRow(kind, id) {
   const row = db.prepare(
     `SELECT id, ${spec.labelCol} as label, ${spec.archiveCol} as archived_at${extra} FROM ${spec.table} ${where}`
   ).get(id);
-  return row || null;
+  if (!row) return null;
+  if (kind === 'scripture') {
+    const s = db.prepare(`SELECT book, chapter, verse_start, verse_end FROM scripture_refs WHERE id = ?`).get(id);
+    if (s) row.meta = { book: s.book || null, chapter: s.chapter ?? null, verse_start: s.verse_start ?? null, verse_end: s.verse_end ?? null };
+  } else if (kind === 'book') {
+    const b = db.prepare(`
+      SELECT b.author_label, b.author_entity_id, e.label as author_entity_label
+      FROM books b LEFT JOIN entities e ON e.id = b.author_entity_id
+      WHERE b.id = ?
+    `).get(id);
+    if (b) row.meta = { author_label: b.author_entity_label || b.author_label || null };
+  }
+  return row;
 }
 
 // Does (parentKind, parentId) already appear in the ancestor chain of
@@ -529,6 +610,15 @@ function setIndexParent(childKind, childId, parentKind, parentId) {
   _indexKindSpec(parentKind);
   if (childKind === parentKind && childId === parentId) {
     throw new Error('an index row cannot be its own parent');
+  }
+  // Headings are TOC-only: they accept heading/collection/artifact children.
+  // A heading is never a target anywhere else; and a child of a heading must
+  // be one of those three kinds.
+  if (parentKind === 'heading') {
+    const allowed = new Set(['heading', 'collection', 'artifact']);
+    if (!allowed.has(childKind)) {
+      throw new Error(`headings can only group headings, collections, and artifacts (got ${childKind})`);
+    }
   }
   if (_isAncestor(parentKind, parentId, childKind, childId)) {
     throw new Error('cycle: target is already a descendant');
@@ -728,6 +818,7 @@ function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
     // bounded + avoid re-walking.
     return {
       kind, id, label: row.label,
+      meta: row.meta || null,
       directPageCount: _directPageCount(kind, id),
       totalPageCount: _totalPageCount(kind, id),
       parents: [], children: [],
@@ -740,6 +831,7 @@ function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
   const kids = getIndexChildren(kind, id);
   return {
     kind, id, label: row.label,
+    meta: row.meta || null,
     directPageCount: _directPageCount(kind, id),
     totalPageCount: _totalPageCount(kind, id),
     parents: getIndexParents(kind, id),
@@ -757,6 +849,7 @@ function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
 function listIndexTree({ includeArchived = false } = {}) {
   const kinds = [];
   const KIND_LABELS = {
+    heading: 'Headings',
     collection: 'Collections', book: 'Books', artifact: 'Artifacts',
     reference: 'References', person: 'People', topic: 'Topics',
     scripture: 'Scripture', user_index: 'My Indexes',
@@ -4578,6 +4671,214 @@ function getPlanningHub({ weekStart } = {}) {
   };
 }
 
+// --- Indexing sharpen: headings (TOC grouping for collections + artifacts) ---
+// Headings are pure organizational containers: a named label + optional
+// description. They participate in the index_parents DAG as both parent and
+// child, so a heading can be nested under another heading, and a collection
+// or artifact can sit under multiple headings.
+
+function createHeading({ id, label, description = null }) {
+  if (!label || !String(label).trim()) throw new Error('label required');
+  const rowId = id || `h_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date().toISOString();
+  const existing = db.prepare(`SELECT id FROM headings WHERE label = ? COLLATE NOCASE`).get(label.trim());
+  if (existing) return { id: existing.id, existed: true };
+  db.prepare(`INSERT INTO headings (id, label, description, created_at) VALUES (?, ?, ?, ?)`)
+    .run(rowId, label.trim(), description || null, now);
+  return { id: rowId, existed: false };
+}
+
+function listHeadings({ includeArchived = false } = {}) {
+  const rows = db.prepare(`
+    SELECT h.id, h.label, h.description, h.archived_at,
+           (SELECT COUNT(*) FROM index_parents ip
+            WHERE ip.parent_kind = 'heading' AND ip.parent_id = h.id) AS child_count
+    FROM headings h
+    ${includeArchived ? '' : 'WHERE h.archived_at IS NULL'}
+    ORDER BY h.label COLLATE NOCASE
+  `).all();
+  return rows;
+}
+
+function renameHeading(id, newLabel) {
+  const label = String(newLabel || '').trim();
+  if (!label) throw new Error('label required');
+  const current = db.prepare(`SELECT id FROM headings WHERE id = ?`).get(id);
+  if (!current) throw new Error('heading not found');
+  const existing = db.prepare(`SELECT id FROM headings WHERE id != ? AND label = ? COLLATE NOCASE`).get(id, label);
+  if (existing) {
+    mergeHeadingInto(id, existing.id);
+    return { id: existing.id, merged_from: id };
+  }
+  db.prepare(`UPDATE headings SET label = ? WHERE id = ?`).run(label, id);
+  return { id };
+}
+
+function mergeHeadingInto(sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) throw new Error('invalid merge');
+  const tx = db.transaction(() => {
+    // Move source's child-edges onto the target (dedup via UPDATE OR IGNORE).
+    db.prepare(`UPDATE OR IGNORE index_parents SET parent_id = ? WHERE parent_kind = 'heading' AND parent_id = ?`)
+      .run(targetId, sourceId);
+    // Move source's own parent-edges onto the target.
+    db.prepare(`UPDATE OR IGNORE index_parents SET child_id = ? WHERE child_kind = 'heading' AND child_id = ?`)
+      .run(targetId, sourceId);
+    // Self-edges can appear if source was under a heading that is now the target.
+    db.prepare(`DELETE FROM index_parents WHERE child_kind = parent_kind AND child_id = parent_id`).run();
+    // Drop any still-duplicate edges (source=target collisions).
+    db.prepare(`DELETE FROM index_parents WHERE (child_kind, child_id, parent_kind, parent_id) IN (
+      SELECT child_kind, child_id, parent_kind, parent_id FROM index_parents
+      WHERE (parent_kind = 'heading' AND parent_id = ?) OR (child_kind = 'heading' AND child_id = ?)
+      GROUP BY child_kind, child_id, parent_kind, parent_id HAVING COUNT(*) > 1
+    )`).run(sourceId, sourceId);
+    db.prepare(`DELETE FROM headings WHERE id = ?`).run(sourceId);
+  });
+  tx();
+  return { source_id: sourceId, target_id: targetId };
+}
+
+function deleteHeading(id) {
+  db.prepare(`DELETE FROM headings WHERE id = ?`).run(id);
+  // Caller (deleteIndexRow) also calls purgeIndexParentsFor.
+}
+
+// --- Indexing sharpen: user_index exclusions / inclusions --------------------
+// Exclusions + inclusions store noise-filter state for AI-curated user_indexes.
+// Exclusions have a `reason`: 'auto_high_frequency' (AI/server filter) or
+// 'user_blocked' (explicit user block).
+function listUserIndexExclusions(userIndexId) {
+  return db.prepare(`
+    SELECT id, user_index_id, entity_kind, entity_id, reason, created_at
+    FROM user_index_exclusions WHERE user_index_id = ?
+    ORDER BY reason, created_at
+  `).all(userIndexId);
+}
+
+function listUserIndexInclusions(userIndexId) {
+  return db.prepare(`
+    SELECT id, user_index_id, entity_kind, entity_id, created_at
+    FROM user_index_inclusions WHERE user_index_id = ?
+    ORDER BY created_at
+  `).all(userIndexId);
+}
+
+function addUserIndexExclusion({ user_index_id, entity_kind, entity_id, reason = 'user_blocked' }) {
+  const id = `uie_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO user_index_exclusions (id, user_index_id, entity_kind, entity_id, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, user_index_id, entity_kind, entity_id, reason, now);
+  // Remove from inclusions if it was forced in.
+  db.prepare(`DELETE FROM user_index_inclusions WHERE user_index_id = ? AND entity_kind = ? AND entity_id = ?`)
+    .run(user_index_id, entity_kind, entity_id);
+  return { id };
+}
+
+function removeUserIndexExclusion(entryId) {
+  db.prepare(`DELETE FROM user_index_exclusions WHERE id = ?`).run(entryId);
+  return { ok: true };
+}
+
+function addUserIndexInclusion({ user_index_id, entity_kind, entity_id }) {
+  const id = `uii_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO user_index_inclusions (id, user_index_id, entity_kind, entity_id, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, user_index_id, entity_kind, entity_id, now);
+  // Remove from exclusions if it was blocked.
+  db.prepare(`DELETE FROM user_index_exclusions WHERE user_index_id = ? AND entity_kind = ? AND entity_id = ?`)
+    .run(user_index_id, entity_kind, entity_id);
+  return { id };
+}
+
+function removeUserIndexInclusion(entryId) {
+  db.prepare(`DELETE FROM user_index_inclusions WHERE id = ?`).run(entryId);
+  return { ok: true };
+}
+
+function purgeUserIndexFilters(userIndexId) {
+  db.prepare(`DELETE FROM user_index_exclusions WHERE user_index_id = ?`).run(userIndexId);
+  db.prepare(`DELETE FROM user_index_inclusions WHERE user_index_id = ?`).run(userIndexId);
+}
+
+function purgeAutoUserIndexExclusions(userIndexId) {
+  db.prepare(`DELETE FROM user_index_exclusions WHERE user_index_id = ? AND reason = 'auto_high_frequency'`)
+    .run(userIndexId);
+}
+
+// --- Indexing sharpen: content_hash for cross-kind auto-link classifier ------
+// A cheap sha1 over the row's lowercased (title|label) + description. The
+// classifier skips rows whose hash hasn't changed since the last sweep —
+// primary cost-control lever per the plan.
+const _CROSS_KIND_TABLES = {
+  collection:  { table: 'collections',         labelCol: 'title',       descCol: 'description' },
+  artifact:    { table: 'artifacts',           labelCol: 'title',       descCol: null },
+  reference:   { table: 'reference_materials', labelCol: 'title',       descCol: 'note' },
+  daily_log:   { table: 'daily_logs',          labelCol: 'date',        descCol: 'summary' },
+};
+
+function _computeContentHashSync(kind, id) {
+  const spec = _CROSS_KIND_TABLES[kind];
+  if (!spec) return null;
+  const cols = spec.descCol
+    ? `${spec.labelCol} AS label, ${spec.descCol} AS description`
+    : `${spec.labelCol} AS label, NULL AS description`;
+  const row = db.prepare(`SELECT ${cols} FROM ${spec.table} WHERE id = ?`).get(id);
+  if (!row) return null;
+  const material = `${(row.label || '').toLowerCase().trim()}\n${(row.description || '').toLowerCase().trim()}`;
+  return require('crypto').createHash('sha1').update(material).digest('hex');
+}
+
+function getCrossKindContent(kind, id) {
+  const spec = _CROSS_KIND_TABLES[kind];
+  if (!spec) return null;
+  const cols = spec.descCol
+    ? `id, ${spec.labelCol} AS label, ${spec.descCol} AS description, content_hash, links_classified_at`
+    : `id, ${spec.labelCol} AS label, NULL AS description, content_hash, links_classified_at`;
+  return db.prepare(`SELECT ${cols} FROM ${spec.table} WHERE id = ?`).get(id) || null;
+}
+
+function refreshContentHash(kind, id) {
+  const spec = _CROSS_KIND_TABLES[kind];
+  if (!spec) return { changed: false, hash: null };
+  const fresh = _computeContentHashSync(kind, id);
+  if (fresh == null) return { changed: false, hash: null };
+  const existing = db.prepare(`SELECT content_hash FROM ${spec.table} WHERE id = ?`).get(id);
+  const prev = existing ? existing.content_hash : null;
+  if (prev === fresh) return { changed: false, hash: fresh };
+  db.prepare(`UPDATE ${spec.table} SET content_hash = ? WHERE id = ?`).run(fresh, id);
+  return { changed: true, hash: fresh };
+}
+
+function markLinksClassified(kind, id) {
+  const spec = _CROSS_KIND_TABLES[kind];
+  if (!spec) return;
+  db.prepare(`UPDATE ${spec.table} SET links_classified_at = ? WHERE id = ?`).run(new Date().toISOString(), id);
+}
+
+// Candidate pool for cross-kind auto-link classifier: all active rows of the
+// eligible target kinds, minus the source itself. Returns {kind,id,label,description}.
+function listCrossKindCandidates({ excludeKind, excludeId }) {
+  const out = [];
+  for (const kind of Object.keys(_CROSS_KIND_TABLES)) {
+    const spec = _CROSS_KIND_TABLES[kind];
+    const cols = spec.descCol
+      ? `id, ${spec.labelCol} AS label, ${spec.descCol} AS description`
+      : `id, ${spec.labelCol} AS label, NULL AS description`;
+    const where = spec.table === 'daily_logs'
+      ? `WHERE 1=1`
+      : `WHERE archived_at IS NULL`;
+    const rows = db.prepare(`SELECT ${cols} FROM ${spec.table} ${where}`).all();
+    for (const r of rows) {
+      if (kind === excludeKind && r.id === excludeId) continue;
+      out.push({ kind, id: r.id, label: r.label || '', description: r.description || '' });
+    }
+  }
+  return out;
+}
+
 // --- Phase 6: unified rename/merge/archive/delete dispatchers ----------------
 // Every index kind flows through one of these four functions so the new
 // /api/index/:kind/:id/* endpoints can stay thin. Per-kind quirks (merge
@@ -4598,6 +4899,7 @@ function renameIndexRow(kind, id, newLabel) {
     case 'artifact': return renameArtifact(id, label);
     case 'reference': return renameReference(id, label);
     case 'user_index': return renameUserIndex(id, label);
+    case 'heading': return renameHeading(id, label);
     default: throw new Error(`rename not supported for kind: ${kind}`);
   }
 }
@@ -4713,6 +5015,12 @@ function mergeIndexRows(kind, sourceId, targetId) {
       purgeIndexParentsFor(kind, sourceId);
       return { id: targetId };
     }
+    case 'heading': {
+      mergeHeadingInto(sourceId, targetId);
+      _rewriteParentEdges(kind, sourceId, targetId);
+      purgeIndexParentsFor(kind, sourceId);
+      return { id: targetId };
+    }
     default: throw new Error(`merge not supported for kind: ${kind}`);
   }
 }
@@ -4789,7 +5097,11 @@ function deleteIndexRow(kind, id) {
       break;
     case 'user_index':
       db.prepare(`DELETE FROM links WHERE to_type='user_index' AND to_id = ?`).run(id);
+      purgeUserIndexFilters(id);
       deleteUserIndex(id);
+      break;
+    case 'heading':
+      deleteHeading(id);
       break;
     default: throw new Error(`delete not supported for kind: ${kind}`);
   }
@@ -5093,4 +5405,11 @@ module.exports = {
   getHomePayload,
   listPagesLinkedToIndex, upsertPageIndexLink, listAllPageIds, getPageClassifierPayload,
   getPageByLocation, deduplicatePages,
+  // Indexing sharpen — headings (TOC), noise filter, cross-kind auto-link
+  createHeading, listHeadings, renameHeading, mergeHeadingInto, deleteHeading,
+  listUserIndexExclusions, listUserIndexInclusions,
+  addUserIndexExclusion, removeUserIndexExclusion,
+  addUserIndexInclusion, removeUserIndexInclusion,
+  purgeUserIndexFilters, purgeAutoUserIndexExclusions,
+  getCrossKindContent, refreshContentHash, markLinksClassified, listCrossKindCandidates,
 };
