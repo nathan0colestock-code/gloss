@@ -1724,10 +1724,12 @@ async function renderCapture() {
   const grid = h('div', { class: 'cap-grid' });
   mainInner.appendChild(grid);
 
-  // Google auto-capture: pending queue + folder settings (only when Google is connected)
+  // Google auto-capture: pending queue (connected only) + settings (always shown)
   let gStatus = null;
   try { gStatus = await api('/api/google/status'); } catch {}
-  if (gStatus && gStatus.connected) {
+  const gConnected = !!(gStatus && gStatus.connected);
+
+  if (gConnected) {
     const { items: pendingCaptures } = await api('/api/google/captures');
     if (pendingCaptures.length > 0) {
       const gcZone = h('div', { class: 'cap-zone' });
@@ -1774,34 +1776,42 @@ async function renderCapture() {
       gcZone.appendChild(captureList);
       grid.appendChild(gcZone);
     }
+  }
 
-    const driveConfig = await api('/api/google/drive-config');
+  {
+    const driveConfig = gConnected ? await api('/api/google/drive-config') : {};
     const settingsZone = h('div', { class: 'cap-zone' });
     settingsZone.appendChild(h('h3', null, 'Google auto-capture'));
-    settingsZone.appendChild(h('div', { class: 'sub' }, 'Images and PDFs dropped in these Drive folders are ingested automatically. New Docs/Sheets anywhere in Drive appear in the queue above.'));
-    const parseFolderId = v => { if (!v) return null; const m = v.match(/\/folders\/([a-zA-Z0-9_-]{10,})/); return m ? m[1] : v.trim() || null; };
-    const scanFolderIn = h('input', { class: 'input', placeholder: 'Notebook scans folder URL or ID', value: driveConfig.scan_folder_id || '' });
-    const refFolderIn  = h('input', { class: 'input', placeholder: 'Reference scans folder URL or ID',  value: driveConfig.reference_folder_id || '' });
-    const pollNowBtn   = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 10px' } }, 'Check now');
-    const folderSave   = h('button', { class: 'btn primary' }, 'Save folder settings');
-    pollNowBtn.addEventListener('click', async () => {
-      pollNowBtn.disabled = true; pollNowBtn.textContent = 'Checking…';
-      try { await api('/api/google/poll', 'POST'); toast('Polled for new files', 'ok'); mainInner.innerHTML = ''; await renderCapture(); }
-      catch (e) { toast(e.message, 'err'); pollNowBtn.disabled = false; pollNowBtn.textContent = 'Check now'; }
-    });
-    folderSave.addEventListener('click', async () => {
-      try {
-        await api('/api/google/drive-config', 'PATCH', { scan_folder_id: parseFolderId(scanFolderIn.value), reference_folder_id: parseFolderId(refFolderIn.value) });
-        toast('Folder settings saved', 'ok');
-      } catch (e) { toast(e.message, 'err'); }
-    });
-    settingsZone.append(
-      h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Notebook scans folder'),
-      scanFolderIn,
-      h('div', { class: 'lbl-mono', style: { margin: '10px 0 4px' } }, 'Reference scans folder'),
-      refFolderIn,
-      h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px', alignItems: 'center' } }, folderSave, pollNowBtn),
-    );
+    if (!gConnected) {
+      settingsZone.appendChild(h('div', { class: 'sub' }, 'Connect your Google account to auto-capture new Docs, Sheets, and Drive folder scans.'));
+      const connectBtn = h('a', { class: 'btn primary', href: '/api/google/connect', style: { display: 'inline-block', marginTop: '8px' } }, 'Connect Google');
+      settingsZone.appendChild(connectBtn);
+    } else {
+      settingsZone.appendChild(h('div', { class: 'sub' }, 'Images and PDFs dropped in these Drive folders are ingested automatically. New Docs/Sheets anywhere in Drive appear in the queue above.'));
+      const parseFolderId = v => { if (!v) return null; const m = v.match(/\/folders\/([a-zA-Z0-9_-]{10,})/); return m ? m[1] : v.trim() || null; };
+      const scanFolderIn = h('input', { class: 'input', placeholder: 'Notebook scans folder URL or ID', value: driveConfig.scan_folder_id || '' });
+      const refFolderIn  = h('input', { class: 'input', placeholder: 'Reference scans folder URL or ID',  value: driveConfig.reference_folder_id || '' });
+      const pollNowBtn   = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 10px' } }, 'Check now');
+      const folderSave   = h('button', { class: 'btn primary' }, 'Save folder settings');
+      pollNowBtn.addEventListener('click', async () => {
+        pollNowBtn.disabled = true; pollNowBtn.textContent = 'Checking…';
+        try { await api('/api/google/poll', 'POST'); toast('Polled for new files', 'ok'); mainInner.innerHTML = ''; await renderCapture(); }
+        catch (e) { toast(e.message, 'err'); pollNowBtn.disabled = false; pollNowBtn.textContent = 'Check now'; }
+      });
+      folderSave.addEventListener('click', async () => {
+        try {
+          await api('/api/google/drive-config', 'PATCH', { scan_folder_id: parseFolderId(scanFolderIn.value), reference_folder_id: parseFolderId(refFolderIn.value) });
+          toast('Folder settings saved', 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+      });
+      settingsZone.append(
+        h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Notebook scans folder'),
+        scanFolderIn,
+        h('div', { class: 'lbl-mono', style: { margin: '10px 0 4px' } }, 'Reference scans folder'),
+        refFolderIn,
+        h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px', alignItems: 'center' } }, folderSave, pollNowBtn),
+      );
+    }
     grid.appendChild(settingsZone);
   }
 
