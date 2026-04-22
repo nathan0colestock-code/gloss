@@ -384,59 +384,74 @@ function buildPriorContext(contextPages) {
 }
 
 // Assign a page to collections based on Gemini's collection_hints.
-// Creates collections on demand, links page↔collection, queues backlog for low-confidence guesses.
+// Invariant: a page files to exactly ONE container — either a daily_log OR one topical
+// collection, never both and never multiple collections.
+// - If any hint is kind='daily_log', we link only to daily logs and skip all collection hints.
+// - Otherwise we take only the first (highest-confidence) collection hint.
 function assignPageToCollections(pageId, hints) {
   const linkedCollections = [];
   const linkedDailyLogs = [];
   const backlogRows = [];
 
-  for (const hint of (hints || [])) {
-    if (!hint.label || !hint.kind) continue;
-    const normalized = normalizeCollectionLabel(hint.kind, hint.label);
-    if (!normalized) continue;
+  const allHints = (hints || []).filter(h => h.label && h.kind);
+  const dailyLogHints = allHints.filter(h => h.kind === 'daily_log');
+  // Sort descending by confidence so the highest-confidence hint is always [0].
+  const collectionHints = allHints
+    .filter(h => h.kind !== 'daily_log')
+    .sort((a, b) => (b.confidence ?? 1.0) - (a.confidence ?? 1.0));
 
-    // Daily logs are no longer collections — route them into the daily_logs table.
-    if (hint.kind === 'daily_log') {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) continue;
-      let dl = db.findDailyLogByDate(normalized);
-      if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: normalized });
-      db.linkPageToDailyLog(pageId, dl.id, hint.confidence ?? 1.0);
-      linkedDailyLogs.push(dl);
-      if ((hint.confidence ?? 1.0) < 0.7) {
+  // Daily logs take priority — if Gemini identified a date, this is a log page.
+  for (const hint of dailyLogHints) {
+    const normalized = normalizeCollectionLabel(hint.kind, hint.label);
+    if (!normalized || !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) continue;
+    let dl = db.findDailyLogByDate(normalized);
+    if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: normalized });
+    db.linkPageToDailyLog(pageId, dl.id, hint.confidence ?? 1.0);
+    linkedDailyLogs.push(dl);
+    if ((hint.confidence ?? 1.0) < 0.7) {
+      backlogRows.push({
+        id: crypto.randomUUID(), kind: 'filing',
+        subject: `Confirm this page belongs to the daily log for ${normalized}`,
+        proposal: `I filed this page under the ${normalized} daily log at ${Math.round((hint.confidence ?? 0) * 100)}% confidence.`,
+        context_page_id: pageId,
+      });
+    }
+  }
+
+  // If this page has a daily log, don't also file it to a collection.
+  if (linkedDailyLogs.length > 0) {
+    if (backlogRows.length) db.insertBacklogItems(backlogRows);
+    return { linkedCollections, linkedDailyLogs, extraBacklog: backlogRows };
+  }
+
+  // No daily log — take only the first (primary) collection hint.
+  const primaryHint = collectionHints[0];
+  if (primaryHint) {
+    const normalized = normalizeCollectionLabel(primaryHint.kind, primaryHint.label);
+    if (normalized) {
+      let collection = db.findCollection(primaryHint.kind, normalized);
+      const _created = !collection;
+      if (!collection) {
+        collection = db.createCollection({
+          id: crypto.randomUUID(),
+          kind: primaryHint.kind,
+          title: normalized,
+        });
+      }
+      db.linkPageToCollection(pageId, collection.id, primaryHint.confidence ?? 1.0);
+      linkedCollections.push({ ...collection, _created });
+
+      if ((primaryHint.confidence ?? 1.0) < 0.7) {
         backlogRows.push({
-          id: crypto.randomUUID(), kind: 'filing',
-          subject: `Confirm this page belongs to the daily log for ${normalized}`,
-          proposal: `I filed this page under the ${normalized} daily log at ${Math.round((hint.confidence ?? 0) * 100)}% confidence.`,
+          id: crypto.randomUUID(),
+          kind: 'filing',
+          subject: `Confirm this page belongs to ${primaryHint.kind}: "${normalized}"`,
+          proposal: primaryHint.continuation
+            ? `This page appears to continue "${normalized}" but the header is absent. Confirm or reassign.`
+            : `I filed this page under "${normalized}" at ${Math.round((primaryHint.confidence ?? 0) * 100)}% confidence.`,
           context_page_id: pageId,
         });
       }
-      continue;
-    }
-
-    let collection = db.findCollection(hint.kind, normalized);
-    let _created = false;
-    if (!collection) {
-      collection = db.createCollection({
-        id: crypto.randomUUID(),
-        kind: hint.kind,
-        title: normalized,
-      });
-      _created = true;
-    }
-    db.linkPageToCollection(pageId, collection.id, hint.confidence ?? 1.0);
-    linkedCollections.push({ ...collection, _created });
-
-    // Low confidence → queue for review
-    if ((hint.confidence ?? 1.0) < 0.7) {
-      backlogRows.push({
-        id: crypto.randomUUID(),
-        kind: 'filing',
-        subject: `Confirm this page belongs to ${hint.kind}: "${normalized}"`,
-        proposal: hint.continuation
-          ? `This page appears to continue "${normalized}" but the header is absent. Confirm or reassign.`
-          : `I filed this page under "${normalized}" at ${Math.round((hint.confidence ?? 0) * 100)}% confidence.`,
-        context_page_id: pageId,
-      });
     }
   }
 
