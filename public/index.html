@@ -2244,6 +2244,8 @@ function renderTreeRow(kind, node, depth) {
       // TOC heading assignment — distinct from the topic-parent ↑ above.
       const headingBtn = buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node));
       actions.append(headingBtn);
+    }
+    if (kind === 'collection' || kind === 'artifact' || kind === 'person') {
       actions.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
     }
   }
