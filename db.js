@@ -1101,6 +1101,26 @@ db.exec(`
   );
 `);
 
+// Google Drive auto-capture: pending queue of auto-discovered Docs/Sheets, and
+// a key-value config table for folder IDs + the Changes API page token.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS google_captures (
+    id            TEXT PRIMARY KEY,
+    drive_file_id TEXT UNIQUE NOT NULL,
+    title         TEXT NOT NULL,
+    mime_type     TEXT NOT NULL,
+    file_url      TEXT NOT NULL,
+    discovered_at TEXT NOT NULL,
+    dismissed_at  TEXT,
+    accepted_kind TEXT,
+    accepted_id   TEXT
+  );
+  CREATE TABLE IF NOT EXISTS google_drive_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`);
+
 // Books (bibliographic notes). Author references a `topic` entity so the same author
 // can be browsed consistently alongside other topical threads.
 db.exec(`
@@ -3144,6 +3164,60 @@ function getGoogleTokens() {
 
 function clearGoogleTokens() {
   db.prepare(`DELETE FROM google_tokens WHERE id = 1`).run();
+}
+
+// --- Google Drive auto-capture ---
+
+function getGoogleDriveConfig(key) {
+  const row = db.prepare(`SELECT value FROM google_drive_config WHERE key = ?`).get(key);
+  return row ? row.value : null;
+}
+
+function setGoogleDriveConfig(key, value) {
+  if (value == null) {
+    db.prepare(`DELETE FROM google_drive_config WHERE key = ?`).run(key);
+  } else {
+    db.prepare(`INSERT INTO google_drive_config (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+  }
+}
+
+function getDrivePageToken() {
+  return getGoogleDriveConfig('drive_page_token');
+}
+
+function saveDrivePageToken(token) {
+  setGoogleDriveConfig('drive_page_token', token);
+}
+
+function upsertGoogleCapture({ id, drive_file_id, title, mime_type, file_url, discovered_at }) {
+  db.prepare(`
+    INSERT INTO google_captures (id, drive_file_id, title, mime_type, file_url, discovered_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(drive_file_id) DO UPDATE SET title = excluded.title
+  `).run(id, drive_file_id, title, mime_type, file_url, discovered_at);
+  return db.prepare(`SELECT * FROM google_captures WHERE drive_file_id = ?`).get(drive_file_id);
+}
+
+function listPendingGoogleCaptures() {
+  return db.prepare(`
+    SELECT * FROM google_captures
+    WHERE dismissed_at IS NULL AND accepted_kind IS NULL
+    ORDER BY discovered_at DESC
+  `).all();
+}
+
+function getGoogleCapture(id) {
+  return db.prepare(`SELECT * FROM google_captures WHERE id = ?`).get(id);
+}
+
+function dismissGoogleCapture(id) {
+  db.prepare(`UPDATE google_captures SET dismissed_at = datetime('now') WHERE id = ?`).run(id);
+}
+
+function acceptGoogleCapture(id, { accepted_kind, accepted_id }) {
+  db.prepare(`UPDATE google_captures SET accepted_kind = ?, accepted_id = ? WHERE id = ?`)
+    .run(accepted_kind, accepted_id, id);
 }
 
 // --- Collections browser ---
@@ -5391,6 +5465,9 @@ module.exports = {
   setArtifactArchived, setReferenceArchived, setReferenceRowType,
   deleteArtifact, mergeArtifactInto,
   saveGoogleTokens, getGoogleTokens, clearGoogleTokens,
+  getGoogleDriveConfig, setGoogleDriveConfig, getDrivePageToken, saveDrivePageToken,
+  upsertGoogleCapture, listPendingGoogleCaptures, getGoogleCapture,
+  dismissGoogleCapture, acceptGoogleCapture,
   linkBetween, deleteLinkById, listLinkedCollections, listLinkedUserIndexes,
   listCollectionsGrouped, getCollectionDetail, listDailyLogs, augmentPage,
   findDailyLogByDate, createDailyLog, getDailyLog, getDailyLogDetail,

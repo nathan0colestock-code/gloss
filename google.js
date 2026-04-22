@@ -196,6 +196,86 @@ async function fetchContentForUrl(url) {
   throw new Error(`Unsupported Google URL kind: ${parsed.kind}`);
 }
 
+// Returns the current start page token for the Drive Changes API. Call once to
+// initialize tracking — files created before this point will not be surfaced.
+async function getDriveChangesStartToken() {
+  const token = await getAccessToken();
+  const resp = await fetch('https://www.googleapis.com/drive/v3/changes/startPageToken', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) throw new Error(`Drive startPageToken failed: ${resp.status} ${await resp.text()}`);
+  const data = await resp.json();
+  return data.startPageToken;
+}
+
+const DRIVE_DOC_MIME = 'application/vnd.google-apps.document';
+const DRIVE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+const BINARY_IMAGE_MIMES = new Set(['image/jpeg','image/png','image/gif','image/webp','image/tiff','image/tif','application/pdf']);
+
+// Poll the Drive Changes API starting from pageToken. Paginates automatically.
+// Returns { files: [{id, name, mimeType, webViewLink, parents}], newPageToken }.
+async function pollDriveChanges(pageToken) {
+  const token = await getAccessToken();
+  const headers = { Authorization: `Bearer ${token}` };
+  const files = [];
+  let cursor = pageToken;
+  let newPageToken = null;
+
+  while (true) {
+    const params = new URLSearchParams({
+      pageToken: cursor,
+      spaces: 'drive',
+      includeRemoved: 'false',
+      fields: 'nextPageToken,newStartPageToken,changes(changeType,removed,file(id,name,mimeType,webViewLink,parents,trashed))',
+    });
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/changes?${params}`, { headers });
+    if (!resp.ok) throw new Error(`Drive changes poll failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+
+    for (const change of (data.changes || [])) {
+      if (change.changeType !== 'file') continue;
+      if (change.removed) continue;
+      const f = change.file;
+      if (!f || f.trashed) continue;
+      files.push({ id: f.id, name: f.name, mimeType: f.mimeType, webViewLink: f.webViewLink, parents: f.parents || [] });
+    }
+
+    if (data.nextPageToken) {
+      cursor = data.nextPageToken;
+    } else {
+      newPageToken = data.newStartPageToken || cursor;
+      break;
+    }
+  }
+
+  return { files, newPageToken };
+}
+
+// Download a Drive file's binary content to destPath by streaming.
+async function downloadDriveFile(fileId, destPath) {
+  const token = await getAccessToken();
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) throw new Error(`Drive download failed: ${resp.status}`);
+  await new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(destPath);
+    const stream = resp.body;
+    const { Writable } = require('stream');
+    // resp.body is a Web Streams ReadableStream (Node 18+ fetch); pipe via getReader.
+    const reader = stream.getReader();
+    function pump() {
+      reader.read().then(({ done, value }) => {
+        if (done) { out.end(); return; }
+        out.write(Buffer.from(value), pump);
+      }).catch(reject);
+    }
+    out.on('finish', resolve);
+    out.on('error', reject);
+    pump();
+  });
+}
+
 function isConfigured() {
   return !!loadClient();
 }
@@ -218,4 +298,8 @@ module.exports = {
   parseGoogleUrl,
   isConfigured,
   status,
+  getDriveChangesStartToken,
+  pollDriveChanges,
+  downloadDriveFile,
+  BINARY_IMAGE_MIMES,
 };
