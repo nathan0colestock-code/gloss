@@ -508,6 +508,110 @@ async function parseVoiceMemo(transcript, recentAnsweredQuestions = [], knownAli
   return JSON.parse(json);
 }
 
+// Parse a user-authored markdown document as a single logical notebook page.
+// Text is user's own prose (not OCR, not handwriting) — still a pointer-summary
+// invariant applies: items/summary/role_summary never quote the markdown verbatim.
+// Returns the same { pages: [PAGE_OBJECT] } shape as parsePageImage so the caller
+// can reuse savePageFromParse and get full collection/book/artifact/reference
+// hint handling, threading, page_refs, etc.
+const MARKDOWN_SYSTEM = `You are parsing a user-authored markdown document for a personal knowledge system called Foxed.
+
+The markdown is the user's own prose, typed directly into the app. Treat it with the same rules as a handwritten notebook page:
+- Never quote the user's words verbatim in any extracted item, summary, or role_summary.
+- Every items[].text is a pointer-summary (max 20 words).
+- raw_ocr_text holds the full markdown exactly as written and is stored privately — never surfaced to downstream LLMs or to the UI except via the transcript endpoint.
+
+Return ONLY valid JSON, no markdown fences, no commentary.`;
+
+const MARKDOWN_PROMPT = `Parse this markdown document as ONE logical notebook page. Return the same top-level shape as handwritten-page parsing:
+
+{ "pages": [ <PAGE_OBJECT> ] }   // exactly one entry — markdown is one logical page
+
+PAGE_OBJECT shape (same as scan parsing, but volume/page_number/continued_from/continued_to are always null — markdown has no notebook position):
+{
+  "volume": null,
+  "page_number": null,
+  "continued_from": null,
+  "continued_to": null,
+  "raw_ocr_text": "<the full markdown exactly as the user typed it>",
+  "summary": "<one pointer-phrase max 12 words. First-person the way the user would describe this note — 'thoughts on catechesis as scaffold', 'research notes on sabbath practice'. NEVER preambles like 'a markdown note about'.>",
+  "collection_hints": [
+    {
+      "kind": "<daily_log|topical|monthly_log|future_log|index>",
+      "label": "<normalized title>",
+      "continuation": false,
+      "confidence": <0.0-1.0>
+    }
+  ],
+  "book_hints":     [ ... same shape as scan parsing ],
+  "artifact_hints": [ ... same shape as scan parsing ],
+  "reference_hints":[ ... same shape as scan parsing ],
+  "items": [
+    { "kind": "task|event|idea|quote|scripture_ref|prayer|prose_block|bibliographic_note",
+      "text": "<pointer-summary max 20 words, NO verbatim>",
+      "status": "<open|done|migrated|scheduled|cancelled|note — OMIT if not applicable>",
+      "confidence": <0.0-1.0>
+    }
+  ],
+  "page_refs": [],
+  "entities": [
+    { "kind": "person|household|scripture|topic|date",
+      "label": "<normalized>",
+      "role_summary": "<one pointer-phrase max 16 words, why this entity appears in this note. Required.>",
+      "book": "<scripture only>", "chapter": <int>, "verse_start": <int|null>, "verse_end": <int|null>
+    }
+  ],
+  "backlog_items": [ ... same shape as scan parsing ]
+}
+
+Guidance specific to markdown:
+- If the first line is a top-level heading (# Title), use it as a TOPICAL collection_hint with that title (confidence 0.9). This is the normal case — markdown notes usually have a clear title.
+- If the document is dated (an explicit YYYY-MM-DD date header, or the user passed a date in context), and the body reads like a daily journal entry, you may emit a daily_log collection_hint instead. Otherwise prefer topical.
+- Markdown lists (- task, - [ ] task, - [x] done) map to items with kind="task" and status="open"/"done" as appropriate.
+- Markdown blockquotes (> ...) are usually quotes — kind="quote" — but still pointer-summarize them.
+- Checkbox syntax "- [x]" = status:"done", "- [ ]" = status:"open".
+- Extract people / scripture / topic entities the same way as for scan pages (only what's actually in the text; never invent).
+- If the markdown is obviously one thing (a topical note) and you have no other signals, emit ONE topical collection_hint. Empty collection_hints is only valid if the document is literally blank.
+
+Subject formatting rules for backlog_items are the same as for scan parsing (e.g. person-ID questions must use the form: Who is "[name]"?).`;
+
+async function parseMarkdownPage(markdown, { recentAnsweredQuestions = [], knownAliases = [], notebookGlossary = [], priorContext = '', userDate = null, userTitle = null } = {}) {
+  const answeredBlock = recentAnsweredQuestions.length
+    ? `The user has previously answered these — do NOT re-ask:\n${recentAnsweredQuestions.map(q => `- Q: ${q.subject}  A: ${q.answer}`).join('\n')}\n\n`
+    : '';
+  const aliasesBlock = knownAliases.length
+    ? `Known person aliases (emit canonical when the document mentions any of these):\n${knownAliases.map(a => `- ${a.aliases.join(', ')} → ${a.canonical}`).join('\n')}\n\n`
+    : '';
+  const glossaryBlock = notebookGlossary.length
+    ? `Notebook vocabulary — do NOT ask about these:\n${notebookGlossary.map(g => `- ${g.term} → ${g.meaning}`).join('\n')}\n\n`
+    : '';
+  const priorBlock = priorContext
+    ? `Recently ingested pages (for collection-continuation detection only, NEVER a source of entities):\n${priorContext}\n\n`
+    : '';
+  const userContextBlock = (userDate || userTitle)
+    ? `User-supplied context for this note:\n${userDate ? `- captured date: ${userDate}\n` : ''}${userTitle ? `- user-supplied title: ${userTitle}\n` : ''}\n`
+    : '';
+  const userText = `${answeredBlock}${aliasesBlock}${glossaryBlock}${priorBlock}${userContextBlock}${MARKDOWN_PROMPT}\n\nMARKDOWN:\n${markdown}`;
+
+  const response = await genai.models.generateContent({
+    model: PARSE_MODEL,
+    contents: [{ role: 'user', parts: [{ text: userText }] }],
+    config: {
+      systemInstruction: MARKDOWN_SYSTEM,
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+      maxOutputTokens: 8192,
+    }
+  });
+
+  const raw = (response.text || '').trim();
+  if (!raw) throw new Error('Gemini returned empty response for markdown');
+  const json = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
+  const parsed = tryParseOrSalvage(json);
+  if (Array.isArray(parsed.pages) && parsed.pages.length > 0) return { pages: parsed.pages };
+  return { pages: [parsed] };
+}
+
 // Fast header-only probe for a single scan. Used BEFORE the full parse on
 // multi-page PDFs so every page-parser gets a document outline and can
 // correctly detect when a collection bleeds across physical pages
@@ -981,7 +1085,7 @@ Return JSON:
 }
 
 module.exports = {
-  parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, probePageHeader,
+  parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
   classifyRowForCrossKind, generateTopicalIndexEntries,
 };
