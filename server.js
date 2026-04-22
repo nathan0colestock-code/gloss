@@ -46,6 +46,103 @@ async function fetchIfGoogle(kind, id, url) {
 
 const SCANS_DIR = path.join(__dirname, 'data', 'scans');
 const ARTIFACTS_DIR = path.join(__dirname, 'data', 'artifacts');
+
+// Map Drive MIME type (or filename extension) to a local file extension for downloads.
+function extFromMimeOrName(mimeType, name) {
+  const m = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+               'image/webp': '.webp', 'image/tiff': '.tif', 'image/tif': '.tif',
+               'application/pdf': '.pdf' };
+  if (m[mimeType]) return m[mimeType];
+  const match = name && name.match(/(\.[a-z0-9]{2,5})$/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+// Poll Google Drive for new files and auto-capture them. Called at startup and
+// on an interval. Also triggered by POST /api/google/poll.
+async function pollGoogleDriveForNewFiles() {
+  const tokens = db.getGoogleTokens();
+  if (!tokens || !tokens.refresh_token) return;
+
+  let pageToken = db.getDrivePageToken();
+  if (!pageToken) {
+    // First run: seed the cursor so we only see files created from now on.
+    try {
+      pageToken = await google.getDriveChangesStartToken();
+      db.saveDrivePageToken(pageToken);
+      console.log('[drive-poll] initialized page token');
+    } catch (e) {
+      console.warn('[drive-poll] failed to get start token:', e.message);
+    }
+    return;
+  }
+
+  let files, newPageToken;
+  try {
+    ({ files, newPageToken } = await google.pollDriveChanges(pageToken));
+  } catch (e) {
+    console.warn('[drive-poll] poll failed:', e.message);
+    return;
+  }
+  db.saveDrivePageToken(newPageToken);
+  if (!files.length) return;
+
+  const scanFolderId = db.getGoogleDriveConfig('scan_folder_id');
+  const refFolderId = db.getGoogleDriveConfig('reference_folder_id');
+  let captured = 0;
+
+  for (const file of files) {
+    try {
+      const inScanFolder = scanFolderId && file.parents.includes(scanFolderId);
+      const inRefFolder = refFolderId && file.parents.includes(refFolderId);
+      const isBinary = google.BINARY_IMAGE_MIMES.has(file.mimeType);
+
+      if (inScanFolder && isBinary) {
+        const ext = extFromMimeOrName(file.mimeType, file.name);
+        const uuid = crypto.randomUUID();
+        const filename = `${uuid}${ext}`;
+        const destPath = path.join(SCANS_DIR, filename);
+        await google.downloadDriveFile(file.id, destPath);
+        if (ext === '.pdf') {
+          await ingestPdf(destPath, { userKindHint: 'page' });
+        } else {
+          await ingestSingleImage(destPath, `/scans/${filename}`);
+        }
+        captured++;
+      } else if (inRefFolder && isBinary) {
+        const ext = extFromMimeOrName(file.mimeType, file.name);
+        const uuid = crypto.randomUUID();
+        const filename = `${uuid}${ext}`;
+        const destPath = path.join(REFERENCES_DIR, filename);
+        await google.downloadDriveFile(file.id, destPath);
+        db.createReference({
+          id: crypto.randomUUID(),
+          title: file.name,
+          source: null,
+          file_path: `/references/${filename}`,
+          external_url: null,
+          note: null,
+          row_type: 'scan',
+        });
+        captured++;
+      } else if (file.mimeType === 'application/vnd.google-apps.document' ||
+                 file.mimeType === 'application/vnd.google-apps.spreadsheet') {
+        db.upsertGoogleCapture({
+          id: crypto.randomUUID(),
+          drive_file_id: file.id,
+          title: file.name,
+          mime_type: file.mimeType,
+          file_url: file.webViewLink,
+          discovered_at: new Date().toISOString(),
+        });
+        captured++;
+      }
+    } catch (e) {
+      console.warn(`[drive-poll] failed to process file ${file.id} (${file.name}):`, e.message);
+    }
+  }
+
+  if (captured) console.log(`[drive-poll] captured ${captured}/${files.length} new Drive files`);
+}
 const REFERENCES_DIR = path.join(__dirname, 'data', 'references');
 fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
 fs.mkdirSync(REFERENCES_DIR, { recursive: true });
@@ -2272,6 +2369,69 @@ app.post('/api/google/disconnect', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Google Drive auto-capture ────────────────────────────────────────────────
+
+app.get('/api/google/captures', (req, res) => {
+  res.json({ items: db.listPendingGoogleCaptures() });
+});
+
+app.post('/api/google/captures/:id/dismiss', (req, res) => {
+  db.dismissGoogleCapture(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/google/captures/:id/accept', async (req, res) => {
+  const { kind } = req.body || {};
+  if (kind !== 'reference' && kind !== 'artifact') {
+    return res.status(400).json({ error: 'kind must be reference or artifact' });
+  }
+  const capture = db.getGoogleCapture(req.params.id);
+  if (!capture) return res.status(404).json({ error: 'capture not found' });
+  if (capture.accepted_kind || capture.dismissed_at) {
+    return res.status(400).json({ error: 'capture already processed' });
+  }
+  const id = crypto.randomUUID();
+  let created;
+  if (kind === 'reference') {
+    created = db.createReference({ id, title: capture.title, source: null, file_path: null,
+                                   external_url: capture.file_url, note: null, row_type: 'link' });
+    fetchIfGoogle('reference', id, capture.file_url).catch(() => {});
+  } else {
+    created = db.createArtifact({ id, title: capture.title, external_url: capture.file_url });
+    fetchIfGoogle('artifact', id, capture.file_url).catch(() => {});
+  }
+  db.acceptGoogleCapture(capture.id, { accepted_kind: kind, accepted_id: id });
+  res.json({ ok: true, kind, id, created });
+});
+
+app.post('/api/google/poll', async (req, res) => {
+  try {
+    await pollGoogleDriveForNewFiles();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/google/drive-config', (req, res) => {
+  res.json({
+    scan_folder_id: db.getGoogleDriveConfig('scan_folder_id') || null,
+    reference_folder_id: db.getGoogleDriveConfig('reference_folder_id') || null,
+  });
+});
+
+app.patch('/api/google/drive-config', (req, res) => {
+  const { scan_folder_id, reference_folder_id } = req.body || {};
+  if (scan_folder_id !== undefined) db.setGoogleDriveConfig('scan_folder_id', scan_folder_id || null);
+  if (reference_folder_id !== undefined) db.setGoogleDriveConfig('reference_folder_id', reference_folder_id || null);
+  res.json({
+    scan_folder_id: db.getGoogleDriveConfig('scan_folder_id') || null,
+    reference_folder_id: db.getGoogleDriveConfig('reference_folder_id') || null,
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+
 app.get('/api/artifacts', (req, res) => {
   res.json({ items: db.listArtifacts() });
 });
@@ -3941,6 +4101,10 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Foxed running at http://localhost:${PORT}`);
     try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
+
+    const DRIVE_POLL_MS = parseInt(process.env.GOOGLE_DRIVE_POLL_INTERVAL_MS || String(10 * 60 * 1000), 10);
+    setTimeout(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), 5000);
+    setInterval(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), DRIVE_POLL_MS);
   });
 }
 
