@@ -22,7 +22,8 @@ const execFileAsync = promisify(execFile);
 
 const db = require('./db');
 const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, probePageHeader,
-        generateIndexStructure, classifyPageForIndexes, suggestMetaCategories } = require('./ai');
+        generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
+        classifyRowForCrossKind, generateTopicalIndexEntries } = require('./ai');
 const google = require('./google');
 
 // Fetch Google Docs/Drive content for artifacts/references when their URL is
@@ -413,15 +414,17 @@ function assignPageToCollections(pageId, hints) {
     }
 
     let collection = db.findCollection(hint.kind, normalized);
+    let _created = false;
     if (!collection) {
       collection = db.createCollection({
         id: crypto.randomUUID(),
         kind: hint.kind,
         title: normalized,
       });
+      _created = true;
     }
     db.linkPageToCollection(pageId, collection.id, hint.confidence ?? 1.0);
-    linkedCollections.push(collection);
+    linkedCollections.push({ ...collection, _created });
 
     // Low confidence → queue for review
     if ((hint.confidence ?? 1.0) < 0.7) {
@@ -500,6 +503,7 @@ function assignPageToArtifacts(pageId, hints, parsedSummary) {
     if (!title) continue;
     const existing = db.listArtifacts().find(a => a.title.toLowerCase() === title.toLowerCase());
     let artifactId;
+    let _created = false;
     if (existing) artifactId = existing.id;
     else {
       const a = db.createArtifact({
@@ -511,9 +515,10 @@ function assignPageToArtifacts(pageId, hints, parsedSummary) {
         external_url: null,
       });
       artifactId = a.id;
+      _created = true;
     }
     db.linkBetween({ from_type: 'page', from_id: pageId, to_type: 'artifact', to_id: artifactId });
-    linkedArtifacts.push({ id: artifactId, title });
+    linkedArtifacts.push({ id: artifactId, title, _created });
 
     if ((hint.confidence ?? 1.0) < 0.7) {
       backlogRows.push({
@@ -550,7 +555,7 @@ function assignPageToReferences(pageId, hints, parsedSummary, scanRelPath, userK
       note: null,
     });
     db.linkBetween({ from_type: 'page', from_id: pageId, to_type: 'reference', to_id: r.id });
-    linkedReferences.push({ id: r.id, title: fallbackTitle });
+    linkedReferences.push({ id: r.id, title: fallbackTitle, _created: true });
     if (backlogRows.length) db.insertBacklogItems(backlogRows);
     return { linkedReferences, extraBacklog: backlogRows };
   }
@@ -558,6 +563,7 @@ function assignPageToReferences(pageId, hints, parsedSummary, scanRelPath, userK
   for (const hint of hintsToProcess) {
     const title = hint.title.trim();
     let refId;
+    let _created = false;
     if (isCardMode) {
       // One reference per page — never deduplicate.
       const r = db.createReference({
@@ -568,6 +574,7 @@ function assignPageToReferences(pageId, hints, parsedSummary, scanRelPath, userK
         note: null,
       });
       refId = r.id;
+      _created = true;
     } else {
       const existing = db.listReferences().find(r => r.title.toLowerCase() === title.toLowerCase());
       if (existing) refId = existing.id;
@@ -580,10 +587,11 @@ function assignPageToReferences(pageId, hints, parsedSummary, scanRelPath, userK
           note: null,
         });
         refId = r.id;
+        _created = true;
       }
     }
     db.linkBetween({ from_type: 'page', from_id: pageId, to_type: 'reference', to_id: refId });
-    linkedReferences.push({ id: refId, title });
+    linkedReferences.push({ id: refId, title, _created });
 
     if ((hint.confidence ?? 1.0) < 0.7) {
       backlogRows.push({
@@ -834,6 +842,19 @@ function savePageFromParse(parsed, scanRelPath, idx, total, { volumeOverride, us
   // stays one collection instead of getting split.
   const anyContinuation = (parsed.collection_hints || []).some(h => h && h.continuation);
   db.applyThreadingForPage(pageId, { continuation: anyContinuation });
+
+  // Cross-kind auto-linking: for every newly-CREATED collection / artifact / reference
+  // from this save, schedule a classifier pass. Fire-and-forget via setImmediate so
+  // the ingest tail never awaits an AI call (invariant: savePageFromParse must not block).
+  for (const c of linkedCollections) {
+    if (c && c._created) scheduleCrossKindClassify('collection', c.id);
+  }
+  for (const a of linkedArtifacts) {
+    if (a && a._created) scheduleCrossKindClassify('artifact', a.id);
+  }
+  for (const r of linkedReferences) {
+    if (r && r._created) scheduleCrossKindClassify('reference', r.id);
+  }
 
   // Phase 7: cross-page references. Resolve every page_refs entry into a
   // page→page link (if target exists) or a pending backlog row (if not yet ingested).
@@ -2296,6 +2317,11 @@ app.patch('/api/artifacts/:id', async (req, res) => {
   const fetch_result = body.external_url
     ? await fetchIfGoogle('artifact', req.params.id, body.external_url)
     : null;
+  // If title or description changed, the content-hash may have shifted — re-run
+  // the cross-kind classifier (debounced, hash-skip still honored downstream).
+  if (body.title !== undefined || body.description !== undefined) {
+    scheduleCrossKindClassify('artifact', req.params.id);
+  }
   res.json({ ok: true, fetch_result });
 });
 app.delete('/api/artifacts/:id', (req, res) => {
@@ -2362,6 +2388,9 @@ app.patch('/api/references/:id', async (req, res) => {
   const fetch_result = body.external_url
     ? await fetchIfGoogle('reference', req.params.id, body.external_url)
     : null;
+  if (body.title !== undefined || body.note !== undefined || body.source !== undefined) {
+    scheduleCrossKindClassify('reference', req.params.id);
+  }
   res.json({ ok: true, fetch_result });
 });
 app.delete('/api/references/:id', (req, res) => {
@@ -2551,6 +2580,7 @@ app.patch('/api/daily-logs/:id', (req, res) => {
   if (typeof req.body.date === 'string' && req.body.date.trim()) patch.date = req.body.date.trim();
   try {
     const updated = db.updateDailyLog(req.params.id, patch);
+    if (patch.summary !== undefined) scheduleCrossKindClassify('daily_log', req.params.id);
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2835,6 +2865,9 @@ app.patch('/api/collections/:id', (req, res) => {
     if (parent_id !== undefined) {
       const r = db.setCollectionParent(req.params.id, parent_id || null);
       out.parent_id = r.parent_id;
+    }
+    if (title !== undefined || description !== undefined || summary !== undefined) {
+      scheduleCrossKindClassify('collection', req.params.id);
     }
     res.json({ ok: true, ...out });
   } catch (err) {
@@ -3581,6 +3614,292 @@ async function classifyAllPagesForIndex(rootUserIndexId) {
   }
 }
 
+// =============================================================================
+// Indexing sharpen — Headings (TOC) + cross-kind auto-link + noise-filtered AI indexes
+// =============================================================================
+
+// ── Headings ────────────────────────────────────────────────────────────────
+app.get('/api/headings', (req, res) => {
+  try {
+    const includeArchived = req.query.archived === 'all';
+    res.json({ items: db.listHeadings({ includeArchived }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/headings', (req, res) => {
+  const { label, description } = req.body || {};
+  if (!label || !String(label).trim()) return res.status(400).json({ error: 'label required' });
+  try {
+    const r = db.createHeading({ label: String(label).trim(), description: description || null });
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Cross-kind auto-link classifier ─────────────────────────────────────────
+// Debounce rapid repeat scheduling of the same (kind, id). Keeps a small
+// in-memory timer map keyed by `${kind}:${id}`.
+const CROSS_KIND_DEBOUNCE_MS = 30 * 1000;
+const _crossKindDebounce = new Map();
+function scheduleCrossKindClassify(kind, id, { force = false } = {}) {
+  const key = `${kind}:${id}`;
+  const existing = _crossKindDebounce.get(key);
+  if (existing) clearTimeout(existing);
+  const t = setTimeout(() => {
+    _crossKindDebounce.delete(key);
+    classifyRowForCrossKindInBackground(kind, id, { force }).catch(err =>
+      console.warn('[cross-kind] bg classify failed:', key, err.message)
+    );
+  }, 50);
+  _crossKindDebounce.set(key, t);
+}
+
+// Cheap bag-of-words overlap for pre-filtering the candidate pool to ≤ CAP.
+// Prevents sending the whole vault to Gemini when hundreds of rows exist.
+function _rankCrossKindCandidates(from, candidates, cap = 40) {
+  const tokens = (s) => new Set(
+    String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3)
+  );
+  const fromTok = tokens(`${from.label} ${from.description}`);
+  if (!fromTok.size) return candidates.slice(0, cap);
+  const scored = candidates.map(c => {
+    const ct = tokens(`${c.label} ${c.description}`);
+    let overlap = 0;
+    for (const t of ct) if (fromTok.has(t)) overlap++;
+    return { ...c, _score: overlap };
+  });
+  scored.sort((a, b) => b._score - a._score);
+  // If nothing overlaps, still return the first `cap` so the AI gets SOMETHING.
+  const nonZero = scored.filter(s => s._score > 0);
+  return (nonZero.length >= cap ? nonZero : scored).slice(0, cap).map(({ _score, ...r }) => r);
+}
+
+async function classifyRowForCrossKindInBackground(fromKind, fromId, { force = false } = {}) {
+  try {
+    const fromRow = db.getCrossKindContent(fromKind, fromId);
+    if (!fromRow) return { linked: 0, proposals: 0, skipped: 'not_found' };
+    // Hash-skip: if nothing meaningful changed since the last sweep, no AI call.
+    if (!force) {
+      const hashState = db.refreshContentHash(fromKind, fromId);
+      // First-run (no prior classify) always runs. Otherwise require a hash change.
+      if (!hashState.changed && fromRow.links_classified_at) {
+        return { linked: 0, proposals: 0, skipped: 'unchanged' };
+      }
+    } else {
+      db.refreshContentHash(fromKind, fromId);
+    }
+    const allCandidates = db.listCrossKindCandidates({ excludeKind: fromKind, excludeId: fromId });
+    if (!allCandidates.length) {
+      db.markLinksClassified(fromKind, fromId);
+      return { linked: 0, proposals: 0 };
+    }
+    const candidates = _rankCrossKindCandidates(fromRow, allCandidates, 40);
+    const { matches } = await classifyRowForCrossKind({
+      fromRow: { kind: fromKind, label: fromRow.label || '', description: fromRow.description || '' },
+      candidates: candidates.map(c => ({ kind: c.kind, id: c.id, label: c.label, description: c.description })),
+    });
+    let linked = 0, proposals = 0;
+    for (const m of (matches || [])) {
+      if (!m || !m.kind || !m.id) continue;
+      const confidence = Number(m.confidence || 0);
+      const roleSummary = (m.role_summary || '').trim() || null;
+      if (confidence >= 0.75) {
+        try {
+          db.linkBetween({
+            from_type: fromKind, from_id: fromId, to_type: m.kind, to_id: m.id,
+            confidence, role_summary: roleSummary,
+          });
+          linked++;
+        } catch (e) { console.warn('[cross-kind] link failed:', e.message); }
+      } else if (confidence >= 0.50) {
+        try {
+          db.insertBacklogItems([{
+            id: crypto.randomUUID(),
+            kind: 'filing',
+            subject: `Auto-link ${fromKind} "${fromRow.label || fromId.slice(0,6)}" to ${m.kind} "${m.label || ''}"?`,
+            proposal: roleSummary || `Proposed link at ${Math.round(confidence * 100)}% confidence.`,
+            context_page_id: null,
+          }]);
+          proposals++;
+        } catch {}
+      }
+    }
+    db.markLinksClassified(fromKind, fromId);
+    return { linked, proposals };
+  } catch (err) {
+    console.warn('classifyRowForCrossKindInBackground failed:', err.message);
+    return { linked: 0, proposals: 0, error: err.message };
+  }
+}
+
+// Synchronous find-related: bypasses the hash-skip and debounce, returns counts.
+app.post('/api/index/:kind/:id/find-related', async (req, res) => {
+  const { kind, id } = req.params;
+  if (!['collection', 'artifact', 'reference', 'daily_log'].includes(kind)) {
+    return res.status(400).json({ error: `find-related not supported for kind: ${kind}` });
+  }
+  try {
+    const r = await classifyRowForCrossKindInBackground(kind, id, { force: true });
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── User-index noise filter: exclusions / inclusions / rebuild ──────────────
+app.get('/api/user-indexes/:id/exclusions', (req, res) => {
+  try {
+    const auto = [];
+    const user = [];
+    const all = db.listUserIndexExclusions(req.params.id);
+    for (const row of all) {
+      const ref = db.lookupIndexRow(row.entity_kind, row.entity_id);
+      const enriched = { ...row, label: ref ? ref.label : null };
+      if (row.reason === 'auto_high_frequency') auto.push(enriched);
+      else user.push(enriched);
+    }
+    const inclusions = db.listUserIndexInclusions(req.params.id).map(row => ({
+      ...row, label: (db.lookupIndexRow(row.entity_kind, row.entity_id) || {}).label || null,
+    }));
+    res.json({ auto, user, inclusions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/user-indexes/:id/exclusions', (req, res) => {
+  const { entity_kind, entity_id, reason } = req.body || {};
+  if (!entity_kind || !entity_id) return res.status(400).json({ error: 'entity_kind and entity_id required' });
+  try {
+    const r = db.addUserIndexExclusion({
+      user_index_id: req.params.id, entity_kind, entity_id, reason: reason || 'user_blocked',
+    });
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/user-indexes/:id/exclusions/:entryId', (req, res) => {
+  try { res.json(db.removeUserIndexExclusion(req.params.entryId)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/user-indexes/:id/inclusions', (req, res) => {
+  const { entity_kind, entity_id } = req.body || {};
+  if (!entity_kind || !entity_id) return res.status(400).json({ error: 'entity_kind and entity_id required' });
+  try {
+    const r = db.addUserIndexInclusion({ user_index_id: req.params.id, entity_kind, entity_id });
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/user-indexes/:id/inclusions/:entryId', (req, res) => {
+  try { res.json(db.removeUserIndexInclusion(req.params.entryId)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Rebuild a topical (back-of-book) user_index: sweep the vault, noise-filter,
+// AI-confirm, then stamp auto-exclusions. User-blocked exclusions and forced
+// inclusions are preserved.
+const NOISE_FRACTION = 0.25;
+app.post('/api/user-indexes/:id/rebuild', async (req, res) => {
+  const id = req.params.id;
+  try {
+    const row = db.lookupIndexRow('user_index', id);
+    if (!row) return res.status(404).json({ error: 'Index not found' });
+    const totalPages = (db.listAllPageIds() || []).length || 1;
+
+    // Gather candidate pool across the back-of-book kinds. Topical indexes are
+    // about themes, so we sweep person + topic + scripture + collection + artifact + reference.
+    const tree = db.listIndexTree({ includeArchived: false });
+    const candidates = [];
+    for (const section of tree.kinds) {
+      if (!['person', 'topic', 'scripture', 'collection', 'artifact', 'reference'].includes(section.kind)) continue;
+      const walk = (rows) => {
+        for (const r of rows) {
+          if (r._repeat) continue;
+          const count = Number(r.count || r.pages_count || r.direct_count || 0);
+          candidates.push({ kind: r.kind, id: r.id, label: r.label, page_count: count });
+          if (r.children?.length) walk(r.children);
+        }
+      };
+      walk(section.active);
+    }
+
+    // Purge prior auto-exclusions — we recompute them. User-blocked + inclusions stay.
+    db.purgeAutoUserIndexExclusions(id);
+
+    // Noise pre-filter: anything appearing on > NOISE_FRACTION of pages.
+    const threshold = Math.max(3, Math.floor(totalPages * NOISE_FRACTION));
+    const userBlockedSet = new Set(db.listUserIndexExclusions(id)
+      .filter(e => e.reason === 'user_blocked')
+      .map(e => `${e.entity_kind}:${e.entity_id}`));
+    const forcedSet = new Set(db.listUserIndexInclusions(id)
+      .map(e => `${e.entity_kind}:${e.entity_id}`));
+    const eligible = [];
+    for (const c of candidates) {
+      const key = `${c.kind}:${c.id}`;
+      if (userBlockedSet.has(key)) continue;
+      if (forcedSet.has(key)) { eligible.push(c); continue; }
+      if (c.page_count > threshold) {
+        db.addUserIndexExclusion({
+          user_index_id: id, entity_kind: c.kind, entity_id: c.id,
+          reason: 'auto_high_frequency',
+        });
+        continue;
+      }
+      eligible.push(c);
+    }
+
+    // AI pass to cull the context-sensitive noise. Cap payload to avoid blowing
+    // the request size on vaults with thousands of candidates.
+    const forAi = eligible.slice(0, 200);
+    let aiEntries = [];
+    let aiRejected = [];
+    try {
+      const resp = await generateTopicalIndexEntries({
+        indexTitle: row.label,
+        indexDescription: row.description || row.structure_description || '',
+        candidates: forAi.map(c => ({ kind: c.kind, id: c.id, label: c.label, page_count: c.page_count })),
+        totalPages,
+      });
+      aiEntries = resp.entries || [];
+      aiRejected = resp.rejected || [];
+    } catch (err) {
+      console.warn('generateTopicalIndexEntries failed:', err.message);
+      aiEntries = forAi.map(c => ({ kind: c.kind, id: c.id }));
+    }
+    // Record AI rejections as auto-exclusions.
+    for (const r of aiRejected) {
+      if (!r || !r.kind || !r.id) continue;
+      if (userBlockedSet.has(`${r.kind}:${r.id}`)) continue;
+      db.addUserIndexExclusion({
+        user_index_id: id, entity_kind: r.kind, entity_id: r.id,
+        reason: 'auto_high_frequency',
+      });
+    }
+
+    db.touchUserIndexClassifiedAt(id);
+    res.json({
+      ok: true,
+      total_candidates: candidates.length,
+      auto_excluded: candidates.length - eligible.length,
+      ai_rejected: aiRejected.length,
+      entries: aiEntries.length,
+      forced_included: forcedSet.size,
+    });
+  } catch (err) {
+    console.error('rebuild failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Expose the re-scan cascade as its own endpoint so the UI can call it cleanly
 // from a page tab. Replaces the old /api/scans/reingest delete step.
 app.post('/api/pages/by-scan-path/delete', (req, res) => {
@@ -3603,8 +3922,11 @@ app.post('/api/admin/dedup-pages', (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Foxed running at http://localhost:${PORT}`);
-  // Seed glossary from any answered backlog questions that haven't been extracted yet.
-  try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Foxed running at http://localhost:${PORT}`);
+    try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
+  });
+}
+
+module.exports = app;
