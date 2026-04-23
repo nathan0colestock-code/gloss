@@ -339,6 +339,15 @@ function recordLoginAttempt(req) {
 
 app.get('/api/health', (req, res) => res.json({ ok: true, now: Date.now() }));
 
+// Public suite config — safe non-secret values the client needs to build
+// cross-app deep links (e.g. "View in Comms" on a person detail). Secrets
+// never appear here; everything is environment-level routing info.
+app.get('/api/suite-config', (req, res) => res.json({
+  comms_url: process.env.COMMS_URL || null,
+  scribe_url: process.env.SCRIBE_URL || null,
+  black_url: process.env.BLACK_URL || null,
+}));
+
 // ── /api/status ────────────────────────────────────────────────────────────
 // Suite-wide status endpoint. Returns app name, version, uptime, and a small
 // set of metrics. Each metric is wrapped in try/catch so a bad query can't
