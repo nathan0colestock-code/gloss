@@ -161,8 +161,14 @@ fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
 fs.mkdirSync(REFERENCES_DIR, { recursive: true });
 
 const app = express();
-app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3747;
+const IS_PROD_EARLY = process.env.NODE_ENV === 'production';
+// Only trust fly-proxy headers in prod; locally that would let any client
+// spoof req.ip and defeat the login rate limiter.
+if (IS_PROD_EARLY) app.set('trust proxy', 1);
+// Bind localhost-only outside prod so the dev-bypass mode (auth disabled
+// when AUTH_PASSWORD unset) isn't LAN-reachable.
+const BIND_HOST = IS_PROD_EARLY ? '0.0.0.0' : (process.env.BIND_HOST || '127.0.0.1');
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '2mb' }));
@@ -243,6 +249,9 @@ if (IS_PROD) {
   }
 }
 const COOKIE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+// /api/suite-config is intentionally NOT in the bypass set — it leaks the
+// suite topology (sibling Fly URLs) and the PWA only needs it after the user
+// has logged in, so a 401 to an anonymous caller is harmless.
 const AUTH_BYPASS = new Set(['/login', '/api/login', '/api/logout', '/api/health', '/api/status', '/favicon.ico']);
 
 // ── Bearer auth (suite-wide) ────────────────────────────────────────────────
@@ -339,14 +348,9 @@ function recordLoginAttempt(req) {
 
 app.get('/api/health', (req, res) => res.json({ ok: true, now: Date.now() }));
 
-// Public suite config — safe non-secret values the client needs to build
-// cross-app deep links (e.g. "View in Comms" on a person detail). Secrets
-// never appear here; everything is environment-level routing info.
-app.get('/api/suite-config', (req, res) => res.json({
-  comms_url: process.env.COMMS_URL || null,
-  scribe_url: process.env.SCRIBE_URL || null,
-  black_url: process.env.BLACK_URL || null,
-}));
+// Suite config — the PWA calls this after login to build cross-app deep
+// links. Moved behind the auth gate (registered after app.use(requireAuth)
+// below) so anonymous scanners can't enumerate sibling Fly URLs.
 
 // ── /api/status ────────────────────────────────────────────────────────────
 // Suite-wide status endpoint. Returns app name, version, uptime, and a small
@@ -424,6 +428,15 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.use(requireAuth);
+
+// ── Authenticated suite config ──────────────────────────────────────────────
+// Routing hints (sibling Fly URLs) for cross-app deep links. Requires a
+// valid session or bearer token.
+app.get('/api/suite-config', (req, res) => res.json({
+  comms_url: process.env.COMMS_URL || null,
+  scribe_url: process.env.SCRIBE_URL || null,
+  black_url: process.env.BLACK_URL || null,
+}));
 
 // Static assets: the font files under /fonts and the PNG/SVG icons never
 // change once shipped, so aggressive immutable caching is safe and dramatically
@@ -4730,8 +4743,8 @@ app.post('/api/comms/sync', async (req, res) => {
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Gloss running at http://localhost:${PORT}`);
+  app.listen(PORT, BIND_HOST, () => {
+    console.log(`Gloss running at http://${BIND_HOST}:${PORT}`);
     try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
 
     if (google.isEnabled()) {
