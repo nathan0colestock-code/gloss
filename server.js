@@ -301,6 +301,10 @@ function requireAuth(req, res, next) {
   if (!AUTH_ENABLED) return next();
   if (AUTH_BYPASS.has(req.path)) return next();
   if (verifyCookie(parseAuthCookie(req))) return next();
+  // Suite-wide Bearer fallback: accept API_KEY / SUITE_API_KEY for any /api/*
+  // route so sibling apps (scribe, black, maestro) can call gloss server-to-
+  // server without juggling session cookies.
+  if (req.path.startsWith('/api/') && checkBearerAuth(req)) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'auth required' });
   return res.redirect('/login');
 }
