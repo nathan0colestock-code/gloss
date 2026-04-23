@@ -8,6 +8,22 @@ Nothing stored in Gloss quotes your prose verbatim. Every entry is a pointer-sum
 
 ---
 
+## Screenshots
+
+**Log** — month-at-a-glance calendar with daily entry counts
+
+![Log view](docs/screenshots/log.png)
+
+**Index** — browsable index across collections, people, topics, scripture, books, and references
+
+![Index view](docs/screenshots/index.png)
+
+**Capture** — drop a scan or paste a voice memo transcript
+
+![Capture view](docs/screenshots/capture.png)
+
+---
+
 ## Stack
 
 - **Server:** Node.js + Express
