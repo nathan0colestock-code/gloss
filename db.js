@@ -5542,7 +5542,12 @@ function getHomePayload() {
   };
 }
 
+// Low-level handle accessor — used by /api/status and other lightweight probes
+// that want to run ad-hoc COUNT queries without adding bespoke exports.
+function handle() { return db; }
+
 module.exports = {
+  handle,
   insertPage, getPage, getRecentPages, applyThreadingForPage, findPageByVolumeAndNumber,
   findPendingPageRefProposals,
   removePageLinksByType, removePageLinkToTarget, removePageUserIndexLink,
