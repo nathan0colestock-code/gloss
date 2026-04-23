@@ -168,6 +168,61 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
+// ── Response compression ─────────────────────────────────────────────────────
+// Brotli (fallback gzip) for HTML/CSS/JS/JSON/SVG when the client accepts it.
+// Binary types (images, PDFs, fonts — fonts are already woff2 compressed) are
+// skipped. Small responses (<1 KiB) also skip since the overhead outweighs the
+// savings. No external dep — uses Node's built-in zlib.
+const zlib = require('zlib');
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript|xml|ld\+json)|image\/svg\+xml)/;
+app.use((req, res, next) => {
+  const accept = String(req.headers['accept-encoding'] || '');
+  const useBrotli = /\bbr\b/.test(accept);
+  const useGzip = !useBrotli && /\bgzip\b/.test(accept);
+  if (!useBrotli && !useGzip) return next();
+
+  const origWrite = res.write.bind(res);
+  const origEnd = res.end.bind(res);
+
+  // Buffer the response and compress once on end(). Works regardless of
+  // whether upstream code uses write/end directly, sendFile, or stream.pipe.
+  const chunks = [];
+  let intercept = true;
+  res.write = function (chunk, enc) {
+    if (!intercept) return origWrite(chunk, enc);
+    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc || 'utf8'));
+    return true;
+  };
+  res.end = function (chunk, enc) {
+    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc || 'utf8'));
+    const type = String(res.getHeader('Content-Type') || '');
+    const encoded = res.getHeader('Content-Encoding');
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const compressible = !encoded && COMPRESSIBLE.test(type) && total >= 1024;
+    intercept = false;
+    if (!compressible) {
+      for (const c of chunks) origWrite(c);
+      return origEnd();
+    }
+    const body = Buffer.concat(chunks, total);
+    const compressor = useBrotli
+      ? zlib.brotliCompressSync(body, { params: {
+          [zlib.constants.BROTLI_PARAM_QUALITY]: 4,
+          [zlib.constants.BROTLI_PARAM_SIZE_HINT]: body.length,
+        }})
+      : zlib.gzipSync(body, { level: 6 });
+    res.setHeader('Content-Encoding', useBrotli ? 'br' : 'gzip');
+    res.setHeader('Content-Length', String(compressor.length));
+    const vary = String(res.getHeader('Vary') || '');
+    if (!vary.includes('Accept-Encoding')) {
+      res.setHeader('Vary', vary ? vary + ', Accept-Encoding' : 'Accept-Encoding');
+    }
+    origWrite(compressor);
+    return origEnd();
+  };
+  next();
+});
+
 // ── Auth ────────────────────────────────────────────────────────────────────
 const IS_PROD = process.env.NODE_ENV === 'production';
 let AUTH_PASSWORD = process.env.AUTH_PASSWORD;
@@ -294,12 +349,37 @@ app.post('/api/logout', (req, res) => {
 
 app.use(requireAuth);
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Static assets: the font files under /fonts and the PNG/SVG icons never
+// change once shipped, so aggressive immutable caching is safe and dramatically
+// improves return-visit load time. index.html itself must always revalidate.
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR, {
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    const rel = path.relative(PUBLIC_DIR, filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    if (rel === 'index.html' || filePath.endsWith('manifest.json')) {
+      // HTML shell must revalidate so users always see new JS/CSS promptly.
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (ext === '.woff2' || ext === '.woff' || ext === '.ttf' || ext === '.otf') {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (ext === '.png' || ext === '.svg' || ext === '.ico' || ext === '.jpg' || ext === '.webp') {
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+    } else if (ext === '.css' || ext === '.js') {
+      res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
+    }
+  },
+}));
 
-// Serve scan images, artifacts, references
-app.use('/scans', express.static(path.join(__dirname, 'data', 'scans')));
-app.use('/artifacts', express.static(ARTIFACTS_DIR));
-app.use('/references', express.static(REFERENCES_DIR));
+// Serve scan images, artifacts, references — content-addressable (UUID
+// filenames) so they can be cached aggressively.
+const longCache = {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=2592000, immutable'),
+};
+app.use('/scans', express.static(path.join(__dirname, 'data', 'scans'), longCache));
+app.use('/artifacts', express.static(ARTIFACTS_DIR, longCache));
+app.use('/references', express.static(REFERENCES_DIR, longCache));
 
 // Multer: save uploads to data/scans with original extension
 const storage = multer.diskStorage({

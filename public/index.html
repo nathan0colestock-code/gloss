@@ -37,7 +37,17 @@
   --shadow-sm:   0 1px 2px rgba(0,0,0,.06);
   --shadow-card: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
   --shadow-lift: 0 8px 24px rgba(0,0,0,.10), 0 3px 8px rgba(0,0,0,.06), 0 0 0 1px rgba(0,0,0,.04);
-  --t: 160ms ease-out;
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+
+  /* Motion system — one canonical easing + a couple of durations.
+     Use var(--t) for most UI transitions, --t-fast for hover states,
+     --t-slow for panel/surface-level transitions. */
+  --ease:        cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-decel:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-fast: 120ms var(--ease);
+  --t:      180ms var(--ease);
+  --t-slow: 280ms var(--ease-decel);
 
   --rail-w: 220px;
   --detail-w: 0px;
@@ -143,7 +153,7 @@ a:hover { color: var(--accent-dim); text-decoration: underline; text-decoration-
 
 #rail {
   flex: 0 0 var(--rail-w);
-  transition: flex-basis 200ms ease-out;
+  transition: flex-basis 240ms var(--ease-decel);
   background: var(--paper-2);
   border-right: 1px solid var(--rule);
   padding: 18px 14px;
@@ -264,12 +274,17 @@ body.has-detail #main-inner {
 /* Detail pane */
 #detail {
   flex: 0 0 var(--detail-w);
-  transition: flex-basis 220ms ease-out;
+  transition: flex-basis 280ms var(--ease-decel);
   overflow: hidden;
   border-left: 1px solid var(--rule);
   background: var(--paper);
   position: sticky; top: 0; align-self: flex-start;
   max-height: 100vh;
+}
+#detail-inner { animation: detail-in 320ms var(--ease-decel); }
+@keyframes detail-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: none; }
 }
 body.has-detail { --detail-w: min(58vw, 900px); }
 #detail-scroll { height: 100vh; overflow-y: auto; }
@@ -352,10 +367,10 @@ body.has-detail { --detail-w: min(58vw, 900px); }
   transition: border-color var(--t), box-shadow var(--t);
   font-size: 13px;
 }
-.input:focus, textarea.input:focus {
+.input:focus, textarea.input:focus, select.input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .input.mono { font-family: var(--font-mono); font-size: 12px; }
 
@@ -397,6 +412,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   transition: background var(--t);
 }
 .spine-row:hover { background: var(--paper-2); }
+.spine-row:active { transform: translateX(1px); }
 .spine-row.today { background: linear-gradient(to right, var(--accent-soft) 0, var(--paper) 160px); }
 .spine-row.today:hover { background: linear-gradient(to right, var(--accent-soft) 0, var(--paper-2) 160px); }
 .spine-row.weekend .spine-dom, .spine-row.weekend .spine-wd { color: var(--ink-faint); }
@@ -446,8 +462,9 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   padding: 22px 24px;
   background: var(--surface);
   box-shadow: var(--shadow-card);
-  transition: box-shadow var(--t);
+  transition: box-shadow var(--t), border-color var(--t);
 }
+.cap-zone:hover { box-shadow: var(--shadow-lift); }
 .cap-zone h3 {
   margin: 0 0 4px;
   font-family: var(--font-sans);
@@ -481,7 +498,15 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   transition: all var(--t);
   cursor: pointer;
 }
-.drop-zone:hover, .drop-zone.drag { border-color: var(--ink); background: var(--paper-2); color: var(--ink-soft); }
+.drop-zone:hover, .drop-zone.drag {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--paper-2));
+  color: var(--ink-soft);
+}
+.drop-zone.drag {
+  transform: scale(1.01);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
 .drop-zone .big { font-size: 14px; color: var(--ink-soft); font-weight: 500; }
 .drop-zone .kbd {
   font-family: var(--font-mono);
@@ -744,7 +769,13 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   box-shadow: var(--shadow-card);
   max-width: 100%;
 }
-.scan-frame img { display: block; width: 100%; height: auto; cursor: zoom-in; transition: transform var(--t); }
+.scan-frame img {
+  display: block; width: 100%; height: auto; cursor: zoom-in;
+  transition: transform var(--t), opacity 320ms var(--ease-decel);
+}
+.scan-frame img:not([src]), .scan-frame img[src=""] { opacity: 0; }
+.scan-frame img[data-loaded="0"] { opacity: 0; }
+.scan-frame img[data-loaded="1"] { opacity: 1; }
 .scan-frame .rot-btn {
   position: absolute; top: 8px; right: 8px;
   background: rgba(249, 248, 246, 0.92);
@@ -900,7 +931,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   transition: all var(--t);
   cursor: pointer;
 }
-.day-tile:hover { border-color: var(--rule); box-shadow: var(--shadow-card); }
+.day-tile:hover { border-color: var(--rule); box-shadow: var(--shadow-card); transform: translateY(-1px); }
 .day-tile .thumb {
   width: 100px; height: 100px;
   background: var(--paper-3);
@@ -986,13 +1017,21 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 #lightbox {
   position: fixed; inset: 0;
   background: rgba(15, 12, 9, 0.92);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   z-index: 200;
   display: none;
   align-items: center;
   justify-content: center;
   cursor: zoom-out;
 }
-#lightbox.open { display: flex; animation: fadeIn 180ms; }
+#lightbox.open { display: flex; animation: lb-in 220ms var(--ease-decel); }
+#lightbox.open img { animation: lb-img-in 280ms var(--ease-decel); }
+@keyframes lb-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes lb-img-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
 #lightbox img {
   max-width: 96vw;
   max-height: 96vh;
@@ -1043,8 +1082,15 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 
 /* ── Cmd+K palette ───────────────────── */
 #cmdk { position: fixed; inset: 0; z-index: 400; display: none; align-items: flex-start; justify-content: center; padding-top: 14vh; }
-#cmdk.open { display: flex; }
-#cmdk-backdrop { position: absolute; inset: 0; background: rgba(15,12,9,0.55); cursor: default; }
+#cmdk.open { display: flex; animation: cmdk-backdrop-fade 180ms var(--ease-decel); }
+#cmdk-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(15,12,9,0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: default;
+}
+@keyframes cmdk-backdrop-fade { from { opacity: 0; } to { opacity: 1; } }
 #cmdk-panel {
   position: relative;
   width: min(640px, 92vw);
@@ -1054,7 +1100,11 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   box-shadow: var(--shadow-lift);
   display: flex; flex-direction: column;
   overflow: hidden;
-  animation: fadeIn 140ms ease-out;
+  animation: cmdk-panel-in 220ms var(--ease-decel);
+}
+@keyframes cmdk-panel-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
 }
 #cmdk-input-wrap {
   display: flex; align-items: center; gap: 10px;
@@ -1142,6 +1192,197 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 999px; border: 2px solid var(--paper); }
 *::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }
+html { scroll-behavior: smooth; }
+
+/* ── Focus rings — accessible, only on keyboard navigation ───── */
+:focus { outline: none; }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--r-sm);
+}
+button:focus-visible, .btn:focus-visible, .chip:focus-visible,
+.nav-btn:focus-visible, .icon-btn:focus-visible, .seg button:focus-visible {
+  box-shadow: var(--shadow-focus);
+}
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; box-shadow: none; }
+.input:focus-visible, textarea.input:focus-visible, select.input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
+}
+
+/* ── Tactile press on buttons (skipped under reduced motion) ─── */
+.btn, .icon-btn, .nav-btn, .chip, .seg button { will-change: transform; }
+.btn:active:not([disabled]),
+.chip:active,
+.pill:active { transform: scale(0.97); }
+.nav-btn:active { background: var(--paper-3); }
+.btn[disabled] { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+
+/* ── App splash + fade-in on boot ────── */
+html.booting body > * { opacity: 0; }
+html.booting #boot-splash { opacity: 1; }
+#boot-splash {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--paper);
+  z-index: 9999;
+  transition: opacity 320ms var(--ease-decel);
+  pointer-events: none;
+}
+#boot-splash.done { opacity: 0; }
+#boot-splash .boot-brand {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  opacity: 0.92;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+#boot-splash .boot-brand .dot { color: var(--accent); }
+@keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
+
+/* ── Top progress bar (shows during API calls) ──────── */
+#nprog {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 2px;
+  background: transparent;
+  z-index: 9998;
+  pointer-events: none;
+  overflow: hidden;
+}
+#nprog::before {
+  content: '';
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 2px;
+  transition: width 220ms var(--ease-decel), opacity 200ms ease-out;
+  opacity: 0;
+}
+#nprog.active::before { opacity: 1; }
+#nprog.done::before { width: 100% !important; opacity: 0; }
+
+/* ── Skeleton shimmer ────────────────── */
+.sk {
+  background: linear-gradient(
+    90deg,
+    var(--paper-2) 0%,
+    color-mix(in srgb, var(--paper-3) 70%, transparent) 50%,
+    var(--paper-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--r-sm);
+  color: transparent !important;
+}
+@keyframes sk-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.sk-text { height: 12px; margin: 6px 0; border-radius: 3px; }
+.sk-title { height: 20px; width: 40%; margin-bottom: 16px; border-radius: 4px; }
+.sk-block { height: 80px; border-radius: var(--r); margin-bottom: 10px; }
+.sk-thumb { width: 100px; height: 100px; border-radius: var(--r-sm); flex-shrink: 0; }
+.sk-chip  { display: inline-block; height: 22px; width: 80px; border-radius: 999px; margin: 0 6px 6px 0; vertical-align: middle; }
+.sk-spine-row {
+  display: grid;
+  grid-template-columns: 28px 42px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.sk-spine-row .sk { height: 14px; border-radius: 3px; }
+.sk-spine-row .sk.w1 { width: 100%; max-width: 70%; }
+.sk-spine-row .sk.w2 { width: 24px; height: 18px; border-radius: 999px; margin-left: auto; }
+.sk-day-tile {
+  display: grid;
+  grid-template-columns: 100px 1fr auto;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  margin-bottom: 10px;
+  background: var(--surface);
+}
+.sk-tree-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 40px;
+  gap: 14px;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+  align-items: center;
+}
+.sk-tree-row .sk { height: 14px; border-radius: 3px; }
+
+/* ── Section/route transitions ───────── */
+#main-inner, #detail-inner {
+  transition: opacity 180ms var(--ease-decel);
+}
+#main-inner.is-swapping,
+#detail-inner.is-swapping { opacity: 0; }
+
+/* ── Reduced motion — honor user preference ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  html { scroll-behavior: auto; }
+  .sk { animation: none; }
+  .btn:active:not([disabled]),
+  .chip:active, .pill:active { transform: none; }
+}
+
+/* ── Empty state polish ───────────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.empty .empty-ico {
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  color: var(--ink-faint);
+  margin-bottom: 4px;
+}
+.empty .empty-title { color: var(--ink-soft); font-weight: 500; font-size: 13.5px; }
+.empty .empty-sub { font-size: 12px; color: var(--ink-faint); }
+
+/* ── Toast polish — click to dismiss, progress bar ───── */
+.toast {
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+  max-width: 360px;
+  padding-right: 20px;
+}
+.toast::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 2px;
+  background: rgba(255,255,255,0.35);
+  width: 100%;
+  transform-origin: left;
+  animation: toast-timer var(--toast-dur, 2600ms) linear forwards;
+}
+@keyframes toast-timer { to { transform: scaleX(0); } }
+.toast:hover::after { animation-play-state: paused; }
+.toast.leaving { animation: toast-out 200ms var(--ease) forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translateX(20px); } }
 
 /* ── Responsive ──────────────────────── */
 @media (max-width: 880px) {
@@ -1188,14 +1429,16 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   #rail { display: none; }
   #shell { display: block; min-height: 100vh; }
 
-  /* Slim top header with brand mark */
+  /* Slim top header with brand mark — translucent blur on iOS */
   #mobile-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
     padding-top: calc(10px + env(safe-area-inset-top));
-    background: var(--paper-2);
+    background: color-mix(in srgb, var(--paper-2) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
     border-bottom: 1px solid var(--rule);
     position: sticky;
     top: 0;
@@ -1217,12 +1460,14 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   }
   #mobile-header .mh-btn:active { background: var(--paper-3); }
 
-  /* Bottom tab bar */
+  /* Bottom tab bar — translucent on iOS Safari with backdrop blur */
   #bottom-tabs {
     display: flex;
     position: fixed;
     left: 0; right: 0; bottom: 0;
-    background: var(--paper-2);
+    background: color-mix(in srgb, var(--paper-2) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
     border-top: 1px solid var(--rule);
     padding: 4px 4px;
     padding-bottom: calc(4px + env(safe-area-inset-bottom));
@@ -1249,7 +1494,9 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   #bottom-tabs .nav-btn .ico { width: 20px; height: 20px; opacity: 0.85; }
   #bottom-tabs .nav-btn .lbl { display: block; font-size: 10px; line-height: 1; }
   #bottom-tabs .nav-btn.active { color: var(--accent); background: transparent; }
-  #bottom-tabs .nav-btn.active .ico { color: var(--accent); opacity: 1; }
+  #bottom-tabs .nav-btn.active .ico { color: var(--accent); opacity: 1; transform: translateY(-1px); }
+  #bottom-tabs .nav-btn .ico { transition: transform 200ms var(--ease-spring), color var(--t); }
+  #bottom-tabs .nav-btn:active { transform: scale(0.94); }
 
   /* Main fills the viewport minus header + tab bar */
   #main { width: 100%; }
@@ -1260,7 +1507,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   }
   body.has-detail #main-inner { padding: 20px 16px calc(80px + env(safe-area-inset-bottom)); }
 
-  /* Detail pane = full-screen overlay */
+  /* Detail pane = full-screen overlay — slides in from the right on open */
   #detail {
     position: fixed;
     inset: 0;
@@ -1272,6 +1519,11 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
     border-left: 0;
     z-index: 70;
     display: none;
+    animation: detail-slide-in 280ms var(--ease-decel);
+  }
+  @keyframes detail-slide-in {
+    from { transform: translateX(24px); opacity: 0; }
+    to   { transform: none; opacity: 1; }
   }
   body.has-detail #detail { display: block; }
   body.has-detail #main { display: block; }  /* don't hide main when detail is a modal */
@@ -1422,6 +1674,9 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 </head>
 <body>
 
+<div id="boot-splash" aria-hidden="true"><div class="boot-brand">Gloss<span class="dot">.</span></div></div>
+<div id="nprog" aria-hidden="true"></div>
+
 <header id="mobile-header" aria-hidden="true">
   <h1 id="brand" style="margin:0">Gloss<span class="dot">.</span></h1>
   <div class="mh-actions">
@@ -1512,6 +1767,8 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 <script>
 // Runs before module script to avoid flash of wrong theme
 (function(){
+  // Mark booting so body children stay hidden until the module removes it.
+  document.documentElement.classList.add('booting');
   var t = localStorage.getItem('foxed.theme');
   if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
     document.documentElement.setAttribute('data-theme', 'dark');
@@ -1585,16 +1842,104 @@ document.getElementById('detail-back-btn')?.addEventListener('click', () => clos
 renderThemeBtn();
 
 function toast(msg, kind = '') {
-  const t = h('div', { class: `toast ${kind}` }, msg);
+  // Errors linger slightly longer; all toasts dismiss on click.
+  const dur = kind === 'err' ? 4200 : 2600;
+  const t = h('div', { class: `toast ${kind}`, title: 'Click to dismiss' }, msg);
+  // Match the ::after progress-bar duration to the toast duration.
+  t.style.setProperty('--toast-dur', dur + 'ms');
+  const id = 'toast-' + Math.random().toString(36).slice(2, 9);
+  t.dataset.id = id;
+  const style = document.createElement('style');
+  style.textContent = `.toast[data-id="${id}"]::after { animation-duration: ${dur}ms; }`;
+  document.head.appendChild(style);
   document.getElementById('toast-stack').appendChild(t);
-  setTimeout(() => {
-    t.style.transition = 'opacity 180ms';
-    t.style.opacity = '0';
-    setTimeout(() => t.remove(), 200);
-  }, 2600);
+  let removed = false;
+  const dismiss = () => {
+    if (removed) return; removed = true;
+    t.classList.add('leaving');
+    setTimeout(() => { t.remove(); style.remove(); }, 220);
+  };
+  t.addEventListener('click', dismiss);
+  setTimeout(dismiss, dur);
 }
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
+
+// ─── Skeleton helpers ──────────────────────
+// Small DOM factories for common skeleton shapes. Keep class names aligned with
+// the .sk / .sk-* CSS in the stylesheet. Prefer these to ad-hoc "Loading…" text.
+function skText(width = '100%') {
+  return h('div', { class: 'sk sk-text', style: { width } });
+}
+function skSpineRows(n = 18) {
+  const wrap = h('div', { class: 'spine' });
+  for (let i = 0; i < n; i++) {
+    wrap.appendChild(h('div', { class: 'sk-spine-row' },
+      h('div', { class: 'sk', style: { width: '20px', height: '12px', marginLeft: 'auto' } }),
+      h('div', { class: 'sk', style: { width: '28px', height: '10px' } }),
+      h('div', { class: 'sk w1', style: { width: `${28 + (i * 7 % 45)}%` } }),
+      h('div', { class: 'sk', style: { width: '24px', height: '12px' } }),
+    ));
+  }
+  return wrap;
+}
+function skDayTiles(n = 3) {
+  const wrap = h('div');
+  for (let i = 0; i < n; i++) {
+    wrap.appendChild(h('div', { class: 'sk-day-tile' },
+      h('div', { class: 'sk sk-thumb' }),
+      h('div', { style: { flex: 1, minWidth: 0 } },
+        h('div', { class: 'sk sk-text', style: { width: '60%', height: '14px' } }),
+        h('div', { class: 'sk sk-text', style: { width: '90%', marginTop: '8px' } }),
+        h('div', { class: 'sk sk-text', style: { width: '70%' } }),
+      ),
+      h('div', { class: 'sk', style: { width: '18px', height: '18px', alignSelf: 'start' } }),
+    ));
+  }
+  return wrap;
+}
+function skTreeRows(n = 10) {
+  const wrap = h('div');
+  for (let i = 0; i < n; i++) {
+    wrap.appendChild(h('div', { class: 'sk-tree-row' },
+      h('div', { class: 'sk', style: { width: '10px', height: '10px' } }),
+      h('div', { class: 'sk', style: { width: `${40 + (i * 11 % 40)}%` } }),
+      h('div', { class: 'sk', style: { width: '32px', height: '12px' } }),
+    ));
+  }
+  return wrap;
+}
+function skPageDetail() {
+  return h('div', null,
+    h('div', { class: 'detail-head' },
+      h('div', null,
+        h('div', { class: 'sk sk-text', style: { width: '180px', height: '18px' } }),
+        h('div', { class: 'sk sk-text', style: { width: '100px', height: '10px', marginTop: '6px' } }),
+      ),
+    ),
+    h('div', { style: { padding: '20px 4px' } },
+      h('div', { class: 'sk sk-block', style: { height: '280px' } }),
+      h('div', { class: 'sk sk-text', style: { width: '80%' } }),
+      h('div', { class: 'sk sk-text', style: { width: '65%' } }),
+      h('div', { class: 'sk sk-text', style: { width: '72%' } }),
+      h('div', { style: { marginTop: '20px' } },
+        h('div', { class: 'sk sk-chip' }),
+        h('div', { class: 'sk sk-chip' }),
+        h('div', { class: 'sk sk-chip' }),
+      ),
+    ),
+  );
+}
+
+// Render an empty state with an icon + title + optional sub-caption.
+function emptyState({ icon, title, sub }) {
+  const ico = h('div', { class: 'empty-ico', html: icon || '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>' });
+  return h('div', { class: 'empty' },
+    ico,
+    h('div', { class: 'empty-title' }, title || 'Nothing here yet.'),
+    sub ? h('div', { class: 'empty-sub' }, sub) : null,
+  );
+}
 
 // Tiny markdown → HTML renderer for rendering user-authored .md pages in the
 // page viewer. Supports the common subset: headings, bold, italic, code (inline
@@ -1726,21 +2071,95 @@ function dateLabel(iso) {
   return new Date(iso + 'T00:00:00').toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+// ─── Top progress bar ─────────────────────
+// Lightweight NProgress-style bar. Shown when any API call is pending so the
+// UI feels responsive even before content arrives. Grows in ticks while
+// inflight > 0, then fills and fades when the last call completes.
+// Plumb width into the #nprog::before fill via a CSS variable on the bar.
+(function(){
+  const s = document.createElement('style');
+  s.textContent = `#nprog::before { width: var(--w, 0%); }`;
+  document.head.appendChild(s);
+})();
+const _nprog = (() => {
+  const el = document.getElementById('nprog');
+  let pending = 0, pct = 0, tick = null, doneT = null;
+  const apply = () => { if (el) el.style.setProperty('--w', pct + '%'); };
+  function start() {
+    pending++;
+    if (pending === 1 && el) {
+      pct = 8; apply();
+      el.classList.remove('done');
+      el.classList.add('active');
+      clearInterval(tick);
+      tick = setInterval(() => {
+        if (pct < 92) { pct += Math.max(0.6, (94 - pct) * 0.08); apply(); }
+      }, 220);
+    }
+  }
+  function stop() {
+    pending = Math.max(0, pending - 1);
+    if (pending === 0 && el) {
+      clearInterval(tick); tick = null;
+      pct = 100; apply();
+      clearTimeout(doneT);
+      doneT = setTimeout(() => {
+        el.classList.remove('active');
+        el.classList.add('done');
+        setTimeout(() => { pct = 0; apply(); el.classList.remove('done'); }, 260);
+      }, 120);
+    }
+  }
+  return { start, stop };
+})();
+
 // ─── api ────────────────────────────────────
+// In-flight dedup: if the same GET is already running, await the existing
+// promise rather than firing a duplicate. Short-lived GET cache (800ms)
+// smooths over quick back-to-back requests (e.g. route → detail → back).
+const _inflight = new Map();
+const _getCache = new Map();
+const GET_CACHE_TTL = 800;
+function _cacheKey(path) { return 'GET ' + path; }
+
 async function api(path, method = 'GET', body) {
+  const isGet = method === 'GET';
+  const key = _cacheKey(path);
+  if (isGet) {
+    const hit = _getCache.get(key);
+    if (hit && Date.now() - hit.at < GET_CACHE_TTL) return hit.v;
+    const running = _inflight.get(key);
+    if (running) return running;
+  }
+
   const opts = { method, headers: {} };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
-  if (!res.ok) {
-    let msg; try { const j = await res.json(); msg = j.detail ? `${j.error}: ${j.detail}` : j.error; } catch {}
-    throw new Error(msg || `${res.status} ${res.statusText}`);
-  }
-  if (res.status === 204) return null;
-  return res.json();
+
+  _nprog.start();
+  const run = (async () => {
+    try {
+      const res = await fetch(path, opts);
+      if (!res.ok) {
+        let msg; try { const j = await res.json(); msg = j.detail ? `${j.error}: ${j.detail}` : j.error; } catch {}
+        throw new Error(msg || `${res.status} ${res.statusText}`);
+      }
+      const data = res.status === 204 ? null : await res.json();
+      if (isGet) _getCache.set(key, { v: data, at: Date.now() });
+      // Non-GET invalidates the cache — any mutation likely affects reads.
+      if (!isGet) _getCache.clear();
+      return data;
+    } finally {
+      _nprog.stop();
+      if (isGet) _inflight.delete(key);
+    }
+  })();
+  if (isGet) _inflight.set(key, run);
+  return run;
 }
+
 async function* ndjson(response) {
   const reader = response.body.getReader();
   const dec = new TextDecoder();
@@ -1783,6 +2202,7 @@ function parseHash() {
   return { nav: parts[0] || 'log', args: parts.slice(1) };
 }
 
+let _firstRouteDone = false;
 async function route() {
   const { nav, args } = parseHash();
   if (nav === 'page') {
@@ -1801,10 +2221,23 @@ async function route() {
     btn.classList.toggle('active', btn.dataset.nav === nav);
   }
   const view = routes[nav] || routes.log;
+
+  // Soft cross-fade on route change (skipped on first route so the splash
+  // handles the reveal). Uses opacity only to keep GPU composite cheap.
+  if (_firstRouteDone) {
+    mainInner.classList.add('is-swapping');
+    await new Promise(r => setTimeout(r, 110));
+  }
   mainInner.innerHTML = '';
   window.scrollTo(0, 0);
-  try { await view(...args); }
-  catch (err) { mainInner.appendChild(h('div', { class: 'empty' }, `Couldn't load: ${err.message}`)); }
+  try {
+    await view(...args);
+  } catch (err) {
+    mainInner.appendChild(emptyState({ title: "Couldn't load.", sub: err.message }));
+  } finally {
+    mainInner.classList.remove('is-swapping');
+    _firstRouteDone = true;
+  }
 }
 
 function navigate(nav, ...args) {
@@ -2019,8 +2452,18 @@ async function renderLog(ym) {
   ));
 
   const spine = h('div', { class: 'spine' });
+  const skeleton = skSpineRows(22);
+  mainInner.appendChild(skeleton);
+  let res;
+  try {
+    res = await api(`/api/logs/month/${month}`);
+  } catch (err) {
+    skeleton.remove();
+    mainInner.appendChild(emptyState({ title: "Couldn't load the log.", sub: err.message }));
+    return;
+  }
+  skeleton.remove();
   mainInner.appendChild(spine);
-  const res = await api(`/api/logs/month/${month}`);
   const today = todayIso();
   for (const d of res.days) {
     const isToday = d.date === today;
@@ -2075,10 +2518,26 @@ function openBlankDay(date) {
 
 async function openDayDetail(id, { skipRedirect = false } = {}) {
   detailInner.innerHTML = '';
-  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  // Skeleton: header + a few tiles so the user sees structure immediately.
+  const sk = h('div', null,
+    h('div', { class: 'detail-head' },
+      h('div', null,
+        h('div', { class: 'sk sk-text', style: { width: '180px', height: '18px' } }),
+        h('div', { class: 'sk sk-text', style: { width: '100px', height: '10px', marginTop: '6px' } }),
+      ),
+    ),
+    h('div', { style: { padding: '18px 4px' } }, skDayTiles(3)),
+  );
+  detailInner.appendChild(sk);
   openDetail();
 
-  const raw = await api(`/api/daily-logs/${id}`);
+  let raw;
+  try { raw = await api(`/api/daily-logs/${id}`); }
+  catch (err) {
+    detailInner.innerHTML = '';
+    detailInner.appendChild(emptyState({ title: "Couldn't load this day.", sub: err.message }));
+    return;
+  }
   const dl = raw.daily_log || raw;
   const date = dl.date;
   const ents = Array.isArray(raw.entities) ? raw.entities : [];
@@ -2206,10 +2665,15 @@ function makeChip(it, kind, textKey = 'label') {
 // ─── PAGE detail ──────────────────────────
 async function openPageDetail(id) {
   detailInner.innerHTML = '';
-  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  detailInner.appendChild(skPageDetail());
   openDetail();
-  const raw = await api(`/api/pages/${id}/detail`);
-  renderPageDetail(unpackPageDetail(raw));
+  try {
+    const raw = await api(`/api/pages/${id}/detail`);
+    renderPageDetail(unpackPageDetail(raw));
+  } catch (err) {
+    detailInner.innerHTML = '';
+    detailInner.appendChild(emptyState({ title: "Couldn't load this page.", sub: err.message }));
+  }
 }
 
 function unpackPageDetail(raw) {
@@ -2312,9 +2776,12 @@ function renderPageDetail(p) {
     const img = h('img', {
       src: `/api/pages/${p.id}/scan`,
       alt: '',
+      decoding: 'async',
+      dataset: { loaded: '0' },
       style: { transform: `rotate(${rotation}deg)`, transformOrigin: 'center center' },
     });
     img.dataset.rotation = rotation;
+    img.addEventListener('load', () => { img.dataset.loaded = '1'; });
     img.addEventListener('click', () => openLightbox(`/api/pages/${p.id}/scan`, p.rotation || 0));
     const frame = h('div', { class: 'scan-frame' },
       img,
@@ -2710,7 +3177,7 @@ async function refreshDraftList(listEl, backlogHost) {
 function openDraftDetail(draftId, listEl, backlogHost) {
   openDetail();
   detailInner.innerHTML = '';
-  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  detailInner.appendChild(skPageDetail());
 
   api('/api/markdown-drafts/' + draftId).then(draft => {
     if (!draft) { detailInner.innerHTML = ''; detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Draft not found.')); return; }
@@ -2853,7 +3320,7 @@ async function startScanIngest(file, kindHint, host, opts = {}) {
         count++;
         const p = evt.page || evt;
         const tile = h('div', { class: 'ingest-tile' },
-          h('img', { src: p.id ? `/api/pages/${p.id}/scan` : '' }),
+          h('img', { src: p.id ? `/api/pages/${p.id}/scan` : '', loading: 'lazy', decoding: 'async' }),
           h('div', { class: 'meta' },
             h('div', { class: 'vp' }, `${p.volume ? 'v.' + p.volume + ' ' : ''}${p.page_number ? 'p.' + p.page_number : ''}`),
             h('div', { class: 'sum' }, p.summary || '(no summary)'),
@@ -3001,17 +3468,40 @@ async function renderIndex(focusKind, focusId) {
     h('h1', { class: 'surface-title' }, 'Index'),
   ));
 
-  // Fetch tree once; cache so tab-switches don't re-fetch
+  // Fetch tree once; cache so tab-switches don't re-fetch. Show a skeleton
+  // tree while the first load is in flight so the surface has structure.
   if (!cachedIndexTree) {
+    const sk = h('div', null,
+      h('div', { style: { display: 'flex', gap: '10px', marginBottom: '22px', borderBottom: '1px solid var(--rule)', paddingBottom: '8px' } },
+        h('div', { class: 'sk', style: { width: '72px', height: '18px' } }),
+        h('div', { class: 'sk', style: { width: '64px', height: '18px' } }),
+        h('div', { class: 'sk', style: { width: '56px', height: '18px' } }),
+        h('div', { class: 'sk', style: { width: '80px', height: '18px' } }),
+      ),
+      skTreeRows(12),
+    );
+    mainInner.appendChild(sk);
     try { cachedIndexTree = await api('/api/index/tree'); }
-    catch (err) { mainInner.appendChild(h('div', { class: 'empty' }, `Couldn't load: ${err.message}`)); return; }
+    catch (err) {
+      sk.remove();
+      mainInner.appendChild(emptyState({ title: "Couldn't load the index.", sub: err.message }));
+      return;
+    }
+    sk.remove();
   }
   const byKind = {};
   for (const group of (cachedIndexTree.kinds || [])) byKind[group.kind] = group.active || [];
 
   // Build available tabs
   const availableTabs = KIND_ORDER.filter(([kind]) => (byKind[kind] || []).length > 0);
-  if (!availableTabs.length) { mainInner.appendChild(h('div', { class: 'empty' }, 'Nothing indexed yet.')); return; }
+  if (!availableTabs.length) {
+    mainInner.appendChild(emptyState({
+      icon: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h16"/></svg>',
+      title: 'Nothing indexed yet.',
+      sub: 'Capture a scan to begin building your index.',
+    }));
+    return;
+  }
 
   if (!activeIndexKind || !availableTabs.find(([k]) => k === activeIndexKind)) {
     activeIndexKind = availableTabs[0][0];
@@ -3477,12 +3967,16 @@ function renderConnectionsPanel(panel, kind, node, conn) {
 async function openEntityDetail(kind, node, { skipRedirect = false } = {}) {
   detailBackContext = null;
   detailInner.innerHTML = '';
-  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+  detailInner.appendChild(skPageDetail());
   openDetail();
 
   let conn;
   try { conn = await api(`/api/index/${kind}/${node.id}/connections`); }
-  catch (err) { detailInner.innerHTML = ''; detailInner.appendChild(h('div', { class: 'empty' }, err.message)); return; }
+  catch (err) {
+    detailInner.innerHTML = '';
+    detailInner.appendChild(emptyState({ title: "Couldn't load.", sub: err.message }));
+    return;
+  }
 
   if (kind === 'artifact') {
     try { conn.meta = await api(`/api/artifacts/${node.id}`); } catch {}
@@ -4122,7 +4616,7 @@ function cmdkHighlight() {
 
 cmdkInput.addEventListener('input', () => {
   clearTimeout(cmdkTimer);
-  cmdkTimer = setTimeout(() => cmdkQuery(cmdkInput.value.trim()), 160);
+  cmdkTimer = setTimeout(() => cmdkQuery(cmdkInput.value.trim()), 110);
 });
 cmdkInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeCmdk(); return; }
@@ -4139,7 +4633,22 @@ document.addEventListener('keydown', e => {
 
 // ─── boot ──────────────────────────────────
 if (!location.hash || location.hash === '#') location.hash = '#/log/' + ymNow();
-route();
+route().finally(() => {
+  // Reveal the app — remove the booting class so body content fades in,
+  // then fade out the splash overlay. Use rAF so the paint is committed.
+  requestAnimationFrame(() => {
+    document.documentElement.classList.remove('booting');
+    const splash = document.getElementById('boot-splash');
+    if (splash) {
+      splash.classList.add('done');
+      setTimeout(() => splash.remove(), 380);
+    }
+    // Prefetch the other two primary routes so the second tap is instant.
+    setTimeout(() => {
+      try { api('/api/index/tree'); } catch {}
+    }, 400);
+  });
+});
 </script>
 </body>
 </html>
