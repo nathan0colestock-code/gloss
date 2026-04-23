@@ -1313,7 +1313,17 @@ function _extractRoleFromProposal(proposal) {
   return m ? m[1].trim() : null;
 }
 
-function savePageFromParse(parsed, scanRelPath, idx, total, { volumeOverride, userKindHint, sourceKindOverride } = {}) {
+function savePageFromParse(parsed, scanRelPath, idx, total, opts = {}) {
+  // Everything below writes across pages, items, collections, books, artifacts,
+  // references, scripture, people, threading and backlog — all in the same
+  // SQLite file. Without a transaction, a mid-stream throw (e.g. malformed
+  // scripture ref → upsertScriptureRef explodes) leaves a half-ingested page:
+  // page row exists, items partial, links partial, no rollback. better-sqlite3
+  // transactions are synchronous and safe to wrap the whole body.
+  return db.handle().transaction(() => _savePageFromParseInner(parsed, scanRelPath, idx, total, opts))();
+}
+
+function _savePageFromParseInner(parsed, scanRelPath, idx, total, { volumeOverride, userKindHint, sourceKindOverride } = {}) {
   const pageId = crypto.randomUUID();
   const sourceKind = sourceKindOverride || sourceKindForIndex(idx, total);
 
@@ -2354,7 +2364,13 @@ function extractQuotedTermFromSubject(subj) {
 // Pull a name out of common person-ID question shapes. Mirrors the dedup logic
 // in db.insertBacklogItems.
 function extractPersonNameFromSubject(subj) {
-  const s = String(subj || '').trim().replace(/[\u201c\u201d\u2018\u2019]/g, '”');
+  // Normalize smart AND ASCII quote chars to the single char “ so the regexes
+  // below (and downstream addPersonAlias) never capture stray quotes as part
+  // of the name. ai.js emits `Who is "[name]"?` with ASCII `"` (prompt mandates
+  // that exact shape); without ASCII in the character class we'd capture the
+  // name as `"Baz"` and persist that to person_aliases, breaking \b-bounded
+  // regex matches and canonical-equality dedup forever.
+  const s = String(subj || '').trim().replace(/[\u201c\u201d\u2018\u2019"']/g, '”');
   let m = s.match(/^who\s+(?:is|are)\s+[“”'']?([^””''?]+?)[“”'']?\??$/i);
   if (m) return m[1].trim();
   m = s.match(/^identify\s+(?:person|people|name):\s*(.+?)\??$/i);
@@ -4771,3 +4787,8 @@ if (require.main === module) {
 }
 
 module.exports = app;
+// Exposed for unit testing — not part of the HTTP surface.
+module.exports.__test = {
+  extractPersonNameFromSubject,
+  savePageFromParse,
+};
