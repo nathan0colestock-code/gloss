@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gloss</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#C9A97A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gloss">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="/fonts/foxed.css">
 <style>
 :root {
@@ -5077,6 +5084,17 @@ route().finally(() => {
     }, 400);
   });
 });
+</script>
+<script>
+// Service worker registration — installs the offline fallback SW on capable
+// browsers. Failures are swallowed; the app degrades to "online only" cleanly.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('[sw] register failed:', err);
+    });
+  });
+}
 </script>
 </body>
 </html>
