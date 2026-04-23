@@ -1154,9 +1154,282 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   body.has-detail #main { display: none; }
   body.has-detail { --detail-w: calc(100vw - 58px); }
 }
+
+/* ── Bottom tab bar (phone only, hidden by default) ─ */
+#bottom-tabs { display: none; }
+#mobile-header { display: none; }
+.detail-back-btn { display: none; }
+
+/* ── Tablet (481–1024px) ───────────── */
+@media (min-width: 481px) and (max-width: 1024px) {
+  body { --rail-w: 56px; }
+  body.rail-collapsed { --rail-w: 56px; }
+  #rail { padding: 18px 6px; }
+  body:not(.rail-collapsed) #brand { opacity: 0; width: 0; }
+  body:not(.rail-collapsed) .nav-btn { justify-content: center; padding: 10px 0; gap: 0; }
+  body:not(.rail-collapsed) .nav-btn .lbl { display: none; }
+  body:not(.rail-collapsed) #rail-footer { opacity: 0; }
+  body:not(.rail-collapsed) #theme-toggle { justify-content: center; padding: 10px 0; gap: 0; }
+  body:not(.rail-collapsed) #theme-toggle .lbl { display: none; }
+  /* Touch-friendly padding on buttons */
+  .btn { padding: 7px 12px; }
+  .btn.sm { padding: 4px 9px; }
+  .chip { padding: 4px 11px; }
+  /* Stack detail under main when open instead of the fixed 58px side-by-side */
+  body.has-detail { --detail-w: min(55vw, 640px); }
+  #main-inner { padding: 32px 24px 80px; }
+  body.has-detail #main-inner { padding: 28px 20px 60px; }
+  #detail-inner { padding: 20px 20px 60px; }
+}
+
+/* ── Phone (≤480px) ────────────────── */
+@media (max-width: 480px) {
+  /* Hide the desktop rail entirely; bottom tabs take over */
+  #rail { display: none; }
+  #shell { display: block; min-height: 100vh; }
+
+  /* Slim top header with brand mark */
+  #mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--rule);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    min-height: 48px;
+  }
+  #mobile-header #brand {
+    font-size: 18px;
+    opacity: 1;
+    width: auto;
+    color: var(--ink);
+  }
+  #mobile-header .mh-actions { display: flex; gap: 6px; }
+  #mobile-header .mh-btn {
+    width: 40px; height: 40px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--r);
+    color: var(--ink-soft);
+  }
+  #mobile-header .mh-btn:active { background: var(--paper-3); }
+
+  /* Bottom tab bar */
+  #bottom-tabs {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: var(--paper-2);
+    border-top: 1px solid var(--rule);
+    padding: 4px 4px;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+    z-index: 60;
+    box-shadow: 0 -1px 6px rgba(0,0,0,0.04);
+  }
+  #bottom-tabs .nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 2px;
+    min-height: 52px;
+    border-radius: var(--r);
+    color: var(--ink-soft);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    overflow: visible;
+  }
+  #bottom-tabs .nav-btn::before { display: none; }
+  #bottom-tabs .nav-btn .ico { width: 20px; height: 20px; opacity: 0.85; }
+  #bottom-tabs .nav-btn .lbl { display: block; font-size: 10px; line-height: 1; }
+  #bottom-tabs .nav-btn.active { color: var(--accent); background: transparent; }
+  #bottom-tabs .nav-btn.active .ico { color: var(--accent); opacity: 1; }
+
+  /* Main fills the viewport minus header + tab bar */
+  #main { width: 100%; }
+  #main-inner {
+    max-width: none;
+    margin: 0;
+    padding: 20px 16px calc(80px + env(safe-area-inset-bottom));
+  }
+  body.has-detail #main-inner { padding: 20px 16px calc(80px + env(safe-area-inset-bottom)); }
+
+  /* Detail pane = full-screen overlay */
+  #detail {
+    position: fixed;
+    inset: 0;
+    padding-top: env(safe-area-inset-top);
+    flex: none;
+    width: 100%;
+    max-height: none;
+    background: var(--paper);
+    border-left: 0;
+    z-index: 70;
+    display: none;
+  }
+  body.has-detail #detail { display: block; }
+  body.has-detail #main { display: block; }  /* don't hide main when detail is a modal */
+  body.has-detail { --detail-w: 0; }
+  #detail-scroll { height: 100vh; height: 100dvh; }
+  #detail-inner { padding: 56px 16px calc(40px + env(safe-area-inset-bottom)); }
+
+  body.has-detail .detail-back-btn {
+    display: inline-flex;
+  }
+  .detail-back-btn {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    left: 8px;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 14px;
+    min-height: 44px;
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--r);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 500;
+    z-index: 75;
+    box-shadow: var(--shadow-card);
+  }
+  .detail-back-btn:active { background: var(--paper-3); }
+
+  /* Touch targets — bump padding on common interactive elements */
+  .btn { padding: 10px 14px; font-size: 13px; min-height: 40px; }
+  .btn.sm { padding: 6px 10px; font-size: 12px; min-height: 32px; }
+  .btn.primary { min-height: 44px; padding: 12px 18px; }
+  .chip { padding: 6px 12px; font-size: 12.5px; }
+  .pill, .btn-ghost { min-height: 36px; padding: 8px 12px; }
+  .input, textarea.input, select.input { padding: 10px 12px; font-size: 16px; }  /* 16px to prevent iOS zoom on focus */
+  .icon-btn { width: 40px; height: 40px; }
+
+  /* Surface headings */
+  .surface-head { flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+  .surface-title { font-size: 24px; }
+  #main-inner .surface-head { flex-direction: column; align-items: flex-start; }
+
+  /* Log month spine — keep dense but tap-friendly */
+  .spine-row {
+    grid-template-columns: 24px 36px 1fr auto;
+    gap: 10px;
+    padding: 14px 8px;
+    min-height: 48px;
+  }
+  .log-head { gap: 8px; }
+  .log-month-label { font-size: 16px; padding: 0 6px; }
+
+  /* Capture surface — stack form vertically */
+  .cap-zone { padding: 16px 14px; }
+  .cap-zone h3 { font-size: 16px; }
+  .cap-type-bar button { padding: 10px 8px; font-size: 12px; min-height: 44px; }
+  .drop-zone { padding: 28px 12px; }
+  .drop-zone .big { font-size: 15px; }
+  .drop-zone .kbd { font-size: 11px; padding: 2px 6px; }
+  .ingest-tile { padding: 10px; gap: 10px; }
+  .ingest-tile img { width: 64px; height: 64px; }
+  .ingest-tile .sum { font-size: 13px; }
+
+  /* Day tile — single column */
+  .day-tile {
+    grid-template-columns: 72px 1fr auto;
+    gap: 10px;
+    padding: 10px;
+  }
+  .day-tile .thumb { width: 72px; height: 72px; }
+  .day-tile .captions { font-size: 13px; -webkit-line-clamp: 3; }
+  .tile-del-btn { opacity: 1; padding: 8px; min-width: 32px; min-height: 32px; }
+  .ctx-badge { font-size: 10.5px; padding: 2px 7px; }
+
+  /* Index tree — taller tap rows, let action buttons wrap */
+  .tree-row {
+    padding: 13px 8px;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 10px;
+    min-height: 48px;
+  }
+  .tree-chevron { width: 20px; height: 20px; font-size: 11px; }
+  .tree-row-actions { opacity: 1; pointer-events: auto; flex-wrap: wrap; }
+  .tree-row-actions .btn { padding: 4px 8px; font-size: 11px; min-height: 28px; }
+  .tree-heading-row .tree-actions { opacity: 1; pointer-events: auto; }
+  .kind-tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+  .kind-tab { white-space: nowrap; padding: 10px 14px; min-height: 44px; }
+  .tree-panel { margin-left: 10px; padding: 10px; }
+  .tree-panel-actions { gap: 6px; }
+  .tree-panel-actions .btn { padding: 6px 10px; font-size: 11.5px; min-height: 32px; }
+  .tree-panel .meta-form { grid-template-columns: 1fr; gap: 4px; }
+
+  /* Cmd+K — full screen */
+  #cmdk { padding-top: 0; align-items: stretch; }
+  #cmdk-panel {
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    border: 0;
+  }
+  #cmdk-input-wrap {
+    padding: 12px 14px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  #cmdk-input { font-size: 16px; }
+  #cmdk-list { flex: 1; max-height: none; }
+  #cmdk-footer { display: none; }
+
+  /* Typeahead popover — full-width near top instead of 340px floater */
+  .typeahead-pop { left: 8px !important; right: 8px !important; width: auto !important; max-height: 70vh; }
+  .typeahead-pop input { font-size: 16px; padding: 12px 14px; }
+  .typeahead-row { padding: 12px 14px; font-size: 14px; min-height: 44px; }
+
+  /* Lightbox — native pinch-zoom, thumb-reachable close */
+  #lightbox img {
+    max-width: 100vw;
+    max-height: 100vh;
+    max-height: 100dvh;
+    touch-action: pinch-zoom;
+    -webkit-user-select: none;
+  }
+  #lightbox .lb-close {
+    top: calc(10px + env(safe-area-inset-top));
+    right: 12px;
+    width: 44px; height: 44px;
+    font-size: 22px;
+  }
+  #lightbox .lb-hint { bottom: calc(14px + env(safe-area-inset-bottom)); font-size: 10.5px; }
+
+  /* Toasts — stack above bottom tab bar */
+  #toast-stack { bottom: calc(72px + env(safe-area-inset-bottom)); right: 12px; left: 12px; }
+  .toast { width: 100%; }
+
+  /* Footnote rail (two-rail) can't fit next to scan on phone — stack */
+  .two-rail { flex-direction: column; gap: 12px; }
+  .footnote-rail { border-left: 0; border-top: 1px dashed var(--rule); padding-top: 10px; padding-left: 0; }
+
+  /* Detail pane header / meta-row */
+  .detail-head { padding: 12px 16px; }
+  .detail-head .title { font-size: 15px; }
+  .meta-row { gap: 10px; font-size: 11px; }
+  .links-group-lbl { min-width: 70px; font-size: 9px; }
+}
 </style>
 </head>
 <body>
+
+<header id="mobile-header" aria-hidden="true">
+  <h1 id="brand" style="margin:0">Gloss<span class="dot">.</span></h1>
+  <div class="mh-actions">
+    <button class="mh-btn" id="mobile-theme-btn" title="Theme" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
 
 <div id="shell">
   <nav id="rail">
@@ -1216,6 +1489,25 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 </div>
 
 <div id="toast-stack"></div>
+
+<button class="detail-back-btn" id="detail-back-btn" aria-label="Back">
+  <span aria-hidden="true">←</span> Back
+</button>
+
+<nav id="bottom-tabs" aria-label="Primary">
+  <button class="nav-btn" data-nav="capture" title="Capture">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    <span class="lbl">Capture</span>
+  </button>
+  <button class="nav-btn" data-nav="log" title="Log">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    <span class="lbl">Log</span>
+  </button>
+  <button class="nav-btn" data-nav="index" title="Index">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    <span class="lbl">Index</span>
+  </button>
+</nav>
 
 <script>
 // Runs before module script to avoid flash of wrong theme
@@ -1288,6 +1580,8 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   if (!localStorage.getItem('foxed.theme')) renderThemeBtn();
 });
 document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+document.getElementById('mobile-theme-btn')?.addEventListener('click', toggleTheme);
+document.getElementById('detail-back-btn')?.addEventListener('click', () => closeDetail());
 renderThemeBtn();
 
 function toast(msg, kind = '') {
@@ -2173,7 +2467,7 @@ async function renderCapture() {
 
   function renderNotebookPanel() {
     const volumeIn  = h('input', { class: 'input', placeholder: 'e.g. D or 4', style: { maxWidth: '120px' } });
-    const fileInput = h('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
+    const fileInput = h('input', { type: 'file', accept: 'image/*,application/pdf', capture: 'environment', style: { display: 'none' } });
     const drop = h('div', { class: 'drop-zone' },
       h('div', { class: 'big' }, 'Drop a scan here'),
       h('div', { style: { marginTop: '6px', fontSize: '12px' } }, 'or ', h('span', { class: 'kbd' }, 'click'), ' to choose'),
