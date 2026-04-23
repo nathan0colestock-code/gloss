@@ -962,6 +962,42 @@ body.has-detail .tree-row-actions { display: none; }
 .md-frame hr { border: none; border-top: 1px dashed var(--rule); margin: 1.2em 0; }
 .md-frame strong { font-weight: 600; }
 .md-frame em { font-style: italic; }
+
+/* Markdown draft editor. Desktop uses compact 12.5px mono; mobile bumps to
+ * 16px in the media query below so iOS doesn't auto-zoom the viewport on
+ * focus (it zooms whenever focused input font-size resolves < 16px). */
+textarea.md-editor { font-size: 12.5px; }
+
+/* Sticky formatting toolbar. Visible only on mobile AND only while the
+ * associated md-editor has focus (JS toggles `.md-toolbar-show` on <body>).
+ * Lives above the keyboard on iOS via position:sticky + the bottom
+ * safe-area inset. Hidden on desktop entirely. */
+.md-toolbar {
+  display: none;
+  position: sticky;
+  bottom: 0;
+  left: 0; right: 0;
+  z-index: 50;
+  gap: 4px;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom)) 8px;
+  background: var(--paper);
+  border-top: 1px solid var(--rule);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.md-toolbar button {
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  color: var(--ink);
+}
+.md-toolbar button:active { background: var(--paper-3); }
 .day-tile .thumb.md {
   font-family: var(--font-mono);
   font-size: 20px;
@@ -1778,6 +1814,8 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
   .chip { padding: 6px 12px; font-size: 12.5px; }
   .pill, .btn-ghost { min-height: 36px; padding: 8px 12px; }
   .input, textarea.input, select.input { padding: 10px 12px; font-size: 16px; }  /* 16px to prevent iOS zoom on focus */
+  textarea.md-editor { font-size: 16px; }  /* markdown editor overrides default 12.5px — iOS zoom guard */
+  body.md-toolbar-show .md-toolbar { display: flex; }
   .icon-btn { width: 40px; height: 40px; }
 
   /* Surface headings */
@@ -3380,7 +3418,73 @@ function renderPageDetail(p) {
   });
   section.appendChild(addBtn);
   body.appendChild(section);
+
+  // ── Scribe promotion ──────────────────────────────────────────────────────
+  // Create a versioned Scribe doc from this gloss page. Each click creates a
+  // new version (v1, v2, …) — existing versions are listed with links.
+  body.appendChild(renderScribePromotion(p));
+
   detailInner.appendChild(body);
+}
+
+// Render the "→ New Scribe version" button + the list of existing versions
+// for this page, populated from p._raw.scribe_versions (surfaced by the
+// /api/pages/:id/detail response).
+function renderScribePromotion(p) {
+  const section = h('div', { class: 'links-section', style: { marginTop: '22px' } });
+  section.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '10px' } }, 'Scribe'));
+
+  const versions = (p._raw && Array.isArray(p._raw.scribe_versions)) ? p._raw.scribe_versions.slice() : [];
+  const list = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' } });
+
+  const renderVersions = (scribeBase) => {
+    list.innerHTML = '';
+    if (!versions.length) {
+      list.appendChild(h('span', { class: 'soft', style: { fontSize: '12.5px' } }, 'No versions yet.'));
+      return;
+    }
+    versions.forEach((v, i) => {
+      const label = `v${i + 1}`;
+      const href = scribeBase ? `${scribeBase.replace(/\/$/, '')}/d/${v.doc_id}` : null;
+      const chip = href
+        ? h('a', { class: 'chip', href, target: '_blank', rel: 'noopener', title: v.title || '' }, label)
+        : h('span', { class: 'chip', title: v.title || '' }, label);
+      list.appendChild(chip);
+    });
+  };
+  renderVersions(null);
+
+  const promoteBtn = h('button', { class: 'btn' }, '→ New Scribe version');
+  const status = h('span', { class: 'mono soft', style: { marginLeft: '10px', fontSize: '12px' } }, '');
+  promoteBtn.addEventListener('click', async () => {
+    promoteBtn.disabled = true;
+    status.textContent = 'Promoting…';
+    try {
+      const res = await api('/api/promote-to-scribe', 'POST', { page_id: p.id });
+      versions.length = 0;
+      (res.scribe_versions || []).forEach(v => versions.push(v));
+      // Re-render chips now that we know the scribe base (it's embedded in scribe_url).
+      const base = res.scribe_url ? res.scribe_url.replace(/\/d\/[^/]+$/, '') : null;
+      renderVersions(base);
+      status.textContent = `Opened ${res.title || 'new version'}`;
+      if (res.scribe_url) window.open(res.scribe_url, '_blank', 'noopener');
+      toast('Promoted to Scribe', 'ok');
+    } catch (err) {
+      status.textContent = '';
+      toast(err.message, 'err');
+    } finally {
+      promoteBtn.disabled = false;
+    }
+  });
+
+  // If suite-config exposes scribe_url, pre-wire the existing version chips so
+  // they're clickable without requiring the user to trigger a promotion first.
+  api('/api/suite-config').then(cfg => {
+    if (cfg && cfg.scribe_url) renderVersions(cfg.scribe_url);
+  }).catch(() => {});
+
+  section.append(list, h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap' } }, promoteBtn, status));
+  return section;
 }
 
 // ─── CAPTURE ──────────────────────────────
@@ -3458,6 +3562,7 @@ async function renderCapture() {
       h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Volume (optional)'),
       volumeIn,
       h('div', { style: { marginTop: '12px' } }, drop, fileInput),
+      renderVoiceRecorder(streamHost),
     );
   }
 
@@ -3698,10 +3803,13 @@ function openDraftDetail(draftId, listEl, backlogHost) {
 
     const dateIn = h('input', { type: 'date', class: 'input', value: draft.date, style: { maxWidth: '180px' } });
     const ta = h('textarea', {
-      class: 'input',
+      class: 'input md-editor',
       rows: 20,
       placeholder: '# On catechesis\n\nScaffolding, not cage. Three notes:\n\n- formation moves slow\n- repetition is not rote\n- the liturgy teaches',
-      style: { fontFamily: 'var(--font-mono)', fontSize: '12.5px', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
+      // Note: font-size is set via CSS (.md-editor) so the mobile media query
+      // can override it to 16px and avoid iOS auto-zoom on focus. Inline
+      // fontSize here would defeat that.
+      style: { fontFamily: 'var(--font-mono)', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
     });
     ta.value = draft.content;
 
@@ -3792,9 +3900,17 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       if (listEl) await refreshDraftList(listEl, backlogHost);
     });
 
+    // Mobile-only sticky formatting toolbar. Hidden on desktop via CSS; on
+    // mobile, shown only while the textarea has focus. Tapping a button wraps
+    // the current selection in the corresponding markdown syntax, or inserts
+    // a placeholder at the cursor if there's no selection. Uses execCommand
+    // so the browser's undo stack stays intact.
+    const toolbar = attachMarkdownToolbar(ta);
+
     body.append(
       h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
       ta,
+      toolbar,
       h('div', { class: 'lbl-mono', style: { marginTop: '14px', marginBottom: '4px' } }, 'File as'),
       fileModeBar,
       filingDetail,
@@ -3803,6 +3919,238 @@ function openDraftDetail(draftId, listEl, backlogHost) {
     detailInner.appendChild(body);
     setTimeout(() => ta.focus(), 50);
   });
+}
+
+// Build a sticky bottom formatting toolbar bound to a <textarea>. The toolbar
+// itself is always rendered; CSS scopes it to mobile viewports (≤640px) and
+// JS toggles `body.md-toolbar-show` while the textarea has focus so it only
+// appears above the on-screen keyboard when the user is actually typing.
+// Each button wraps the current selection (or inserts a template at the
+// cursor) using document.execCommand('insertText') so the native undo stack
+// stays intact — no dependency on contentEditable/TipTap/etc.
+function attachMarkdownToolbar(ta) {
+  const toolbar = h('div', { class: 'md-toolbar', role: 'toolbar' });
+  const apply = (before, after, placeholder) => {
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const selected = ta.value.slice(start, end);
+    const inner = selected || placeholder || '';
+    const insert = `${before}${inner}${after}`;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    if (!document.execCommand('insertText', false, insert)) {
+      ta.setRangeText(insert, start, end, 'end');
+    }
+    // Place the caret at the inner text so the user can immediately overtype.
+    const innerStart = start + before.length;
+    ta.setSelectionRange(innerStart, innerStart + inner.length);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const linePrefix = (prefix) => {
+    const start = ta.selectionStart;
+    const value = ta.value;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    ta.focus();
+    ta.setSelectionRange(lineStart, lineStart);
+    if (!document.execCommand('insertText', false, prefix)) {
+      ta.setRangeText(prefix, lineStart, lineStart, 'end');
+    }
+    const newPos = start + prefix.length;
+    ta.setSelectionRange(newPos, newPos);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const buttons = [
+    ['B',   () => apply('**', '**', 'bold'),           'Bold'],
+    ['I',   () => apply('*',  '*',  'italic'),         'Italic'],
+    ['H1',  () => linePrefix('# '),                    'Heading 1'],
+    ['H2',  () => linePrefix('## '),                   'Heading 2'],
+    ['•',   () => linePrefix('- '),                    'Bullet list'],
+    ['☐',   () => linePrefix('- [ ] '),                'Checklist'],
+    ['🔗',  () => apply('[', '](url)', 'link text'),   'Link'],
+  ];
+  for (const [label, handler, title] of buttons) {
+    const btn = h('button', { type: 'button', title, onmousedown: (e) => e.preventDefault() }, label);
+    btn.addEventListener('click', (e) => { e.preventDefault(); handler(); });
+    toolbar.appendChild(btn);
+  }
+  ta.addEventListener('focus', () => document.body.classList.add('md-toolbar-show'));
+  ta.addEventListener('blur',  () => {
+    // Delay so a toolbar-button tap (which briefly blurs the textarea) doesn't
+    // flicker the toolbar away between mousedown and click.
+    setTimeout(() => {
+      if (document.activeElement !== ta) document.body.classList.remove('md-toolbar-show');
+    }, 100);
+  });
+  return toolbar;
+}
+
+// Voice-memo recorder. Renders a [🎙 Record] button; on tap, requests mic
+// access, streams to MediaRecorder, and on stop uploads the blob to
+// /api/ingest/voice-audio. The server handles transcription via Gemini and
+// runs the transcript through the existing parseVoiceMemo pipeline — same
+// entity extraction / backlog / index classification as the typed-transcript
+// path. Graceful fallback: if MediaRecorder is unsupported (old browsers),
+// the button is hidden and a console log notes why.
+function renderVoiceRecorder(streamHost) {
+  const wrap = h('div', { style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px dashed var(--rule)' } });
+  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.log('[voice] MediaRecorder unavailable — recording UI hidden');
+    wrap.style.display = 'none';
+    return wrap;
+  }
+  const label = h('div', { class: 'lbl-mono', style: { marginBottom: '6px' } }, 'Voice memo');
+  const recBtn = h('button', { class: 'btn', style: { minWidth: '140px' } }, '🎙 Record');
+  const status = h('span', { class: 'mono soft', style: { marginLeft: '10px', fontSize: '12px' } }, '');
+  const row = h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } }, recBtn, status);
+  wrap.append(label, row);
+
+  let recorder = null;
+  let chunks = [];
+  let stream = null;
+  let startedAt = 0;
+  let timerId = null;
+  let mimeType = '';
+
+  const stopTimer = () => { if (timerId) { clearInterval(timerId); timerId = null; } };
+  const cleanupStream = () => {
+    try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
+    stream = null;
+  };
+  // iOS Safari only reliably supports mp4/aac for MediaRecorder; desktop +
+  // Android Chrome prefer webm/opus. Pick the first the browser accepts.
+  const pickMimeType = () => {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac'];
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return ''; // let the browser pick
+  };
+
+  const stopRecording = () => {
+    if (!recorder || recorder.state !== 'recording') return;
+    try { recorder.stop(); } catch {}
+  };
+
+  recBtn.addEventListener('click', async () => {
+    if (recorder && recorder.state === 'recording') { stopRecording(); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      toast(`Mic access denied: ${err.message}`, 'err');
+      return;
+    }
+    mimeType = pickMimeType();
+    try {
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    } catch (err) {
+      toast(`Can't start recorder: ${err.message}`, 'err');
+      cleanupStream();
+      return;
+    }
+    chunks = [];
+    recorder.addEventListener('dataavailable', e => { if (e.data && e.data.size) chunks.push(e.data); });
+    recorder.addEventListener('stop', async () => {
+      stopTimer();
+      cleanupStream();
+      recBtn.textContent = '🎙 Record';
+      recBtn.classList.remove('primary');
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+      const ext = /mp4|aac/.test(blob.type) ? 'm4a' : (/ogg/.test(blob.type) ? 'ogg' : 'webm');
+      if (!blob.size) { status.textContent = 'No audio captured'; return; }
+      status.textContent = `Uploading (${Math.round(blob.size/1024)}KB)…`;
+      recBtn.disabled = true;
+      // Live-entity chip host — entity chips appear here as Gemini streams
+      // them back. Falls back gracefully if the browser can't stream.
+      let chipHost = null;
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, `memo.${ext}`);
+        fd.append('date', todayIso());
+        // Request NDJSON streaming. If the browser's fetch doesn't support
+        // streamed bodies, the server still writes the full payload and the
+        // non-streaming parse runs server-side — the client just reads it all
+        // at once and gets the final 'done' frame.
+        const supportsStream = typeof ReadableStream !== 'undefined' && typeof TextDecoder !== 'undefined';
+        const res = await fetch('/api/ingest/voice-audio', {
+          method: 'POST',
+          body: fd,
+          headers: supportsStream ? { 'Accept': 'application/x-ndjson' } : {},
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`upload failed (${res.status}) ${body.slice(0, 160)}`);
+        }
+        const contentType = res.headers.get('content-type') || '';
+        let result = null;
+        if (/x-ndjson/i.test(contentType) && supportsStream) {
+          // Streaming: consume ndjson frames and render chips as they arrive.
+          chipHost = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } });
+          row.appendChild(chipHost);
+          for await (const frame of ndjson(res)) {
+            if (frame.type === 'transcript') {
+              status.textContent = `Transcribed ${frame.transcript.length} chars · parsing…`;
+            } else if (frame.type === 'delta') {
+              for (const e of (frame.entities || [])) {
+                const label = e.label || e.canonical || '(entity)';
+                chipHost.appendChild(h('span', { class: 'chip soft', title: e.role_summary || e.kind || '' }, `${e.kind === 'scripture' ? '✝' : e.kind === 'person' ? '◉' : '#'} ${label}`));
+              }
+              if (frame.summary) status.textContent = 'Parsing · ' + frame.summary.slice(0, 60);
+            } else if (frame.type === 'done') {
+              result = frame;
+            } else if (frame.type === 'error' && frame.fatal) {
+              throw new Error(frame.error || 'parse failed');
+            }
+          }
+          if (!result) throw new Error('stream ended without save confirmation');
+        } else {
+          result = await res.json();
+        }
+        status.textContent = `Saved · ${result.items_count || 0} items`;
+        // Confirmation tile — tap to open the detail.
+        const tile = h('div', { class: 'ingest-tile' },
+          h('div', { class: 'meta' },
+            h('div', { class: 'vp' }, '🎙 voice memo'),
+            h('div', { class: 'sum' }, result.summary || '(no summary)'),
+          ),
+        );
+        if (result.page_id) tile.addEventListener('click', () => navigate('page', result.page_id));
+        if (streamHost) {
+          const prev = streamHost.querySelector('.ingest-stream');
+          if (!prev) {
+            const stream = h('div', { class: 'ingest-stream' }, tile);
+            streamHost.appendChild(stream);
+          } else {
+            prev.appendChild(tile);
+          }
+        }
+        toast('Voice memo saved', 'ok');
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+        toast(err.message, 'err');
+      } finally {
+        recBtn.disabled = false;
+      }
+    });
+    try {
+      recorder.start();
+    } catch (err) {
+      toast(`Recorder refused to start: ${err.message}`, 'err');
+      cleanupStream();
+      return;
+    }
+    startedAt = Date.now();
+    recBtn.textContent = '⏹ Stop';
+    recBtn.classList.add('primary');
+    const updateTimer = () => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      const m = String(Math.floor(secs / 60)).padStart(2, '0');
+      const s = String(secs % 60).padStart(2, '0');
+      status.textContent = `● recording ${m}:${s}`;
+    };
+    updateTimer();
+    timerId = setInterval(updateTimer, 500);
+  });
+
+  return wrap;
 }
 
 async function startScanIngest(file, kindHint, host, opts = {}) {

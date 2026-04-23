@@ -236,6 +236,10 @@ ensureColumn('pages', 'continued_to',   'INTEGER');
 // underlying scan file on disk is never modified. See rotatePage() / setPageRotation().
 ensureColumn('pages', 'rotation', 'INTEGER DEFAULT 0');
 ensureColumn('pages', 'deleted_at', 'TEXT');
+// Scribe promotion log — JSON array of { doc_id, title, created_at } rows,
+// one per successful POST /api/promote-to-scribe for this page. Shown on the
+// page detail view so the user can jump back to every Scribe version.
+ensureColumn('pages', 'scribe_versions', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS ix_pages_vol_pagenum ON pages(volume, page_number)');
 ensureColumn('links', 'role_summary', 'TEXT');
 ensureColumn('collections', 'summary', 'TEXT');
@@ -394,6 +398,12 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS ux_user_indexes_title    ON user_indexes(title COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS ix_links_to                     ON links(to_type, to_id);
   CREATE INDEX IF NOT EXISTS ix_links_from                   ON links(from_type, from_id);
+  -- Speeds up the /api/index/tree recursive page-count CTE, which scans
+  -- links.from_type='page' joined by (to_type, to_id) at every recursion step.
+  -- A covering (from_type, to_type, to_id, from_id) index lets SQLite satisfy
+  -- both filter predicates and the DISTINCT from_id aggregation from the index
+  -- alone without reading the row.
+  CREATE INDEX IF NOT EXISTS ix_links_from_to_covering       ON links(from_type, to_type, to_id, from_id);
   CREATE INDEX IF NOT EXISTS ix_backlog_status               ON backlog_items(status);
   CREATE INDEX IF NOT EXISTS ix_backlog_context_page         ON backlog_items(context_page_id);
   CREATE INDEX IF NOT EXISTS ix_pages_volume_page            ON pages(volume, page_number);
@@ -961,17 +971,24 @@ function listIndexTree({ includeArchived = false } = {}) {
     reference: 'References', person: 'People', topic: 'Topics',
     scripture: 'Scripture', user_index: 'My Indexes',
   };
+  // Bucket every row already preloaded into ctx.rowMap by kind, splitting
+  // active/archived. This replaces the 18 per-kind SELECT id FROM <table>
+  // queries the old implementation issued (9 kinds × active+archived) with
+  // zero extra queries — rowMap already has every row + archived_at we need.
+  const buckets = new Map(); // kind → { active: [row], archived: [row] }
+  for (const kind of ALL_INDEX_KINDS) buckets.set(kind, { active: [], archived: [] });
+  for (const [key, row] of ctx.rowMap) {
+    const colon = key.indexOf(':');
+    const kind = key.slice(0, colon);
+    const bucket = buckets.get(kind);
+    if (!bucket) continue;
+    (row.archived_at ? bucket.archived : bucket.active).push(row);
+  }
+  const byLabel = (a, b) => String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
   for (const kind of ALL_INDEX_KINDS) {
-    const spec = _indexKindSpec(kind);
-    const whereActive   = `${spec.archiveCol} IS NULL`;
-    const whereArchived = `${spec.archiveCol} IS NOT NULL`;
-    const kindFilter    = spec.kindFilter ? `AND ${spec.kindFilter}` : '';
-    const activeRows = db.prepare(
-      `SELECT id FROM ${spec.table} WHERE ${whereActive} ${kindFilter} ORDER BY ${spec.labelCol} COLLATE NOCASE`
-    ).all();
-    const archivedRows = includeArchived
-      ? db.prepare(`SELECT id FROM ${spec.table} WHERE ${whereArchived} ${kindFilter} ORDER BY ${spec.labelCol} COLLATE NOCASE`).all()
-      : [];
+    const { active, archived } = buckets.get(kind);
+    active.sort(byLabel);
+    if (includeArchived) archived.sort(byLabel);
     // Top-level rows: nodes with no same-kind parent (cross-kind parents are OK —
     // a topic under a user_index still appears at the top of the Topics section).
     const filterTopLevel = (rows) => rows.filter(r => !ctx.hasParentInSameKind.has(`${kind}:${r.id}`));
@@ -979,8 +996,10 @@ function listIndexTree({ includeArchived = false } = {}) {
     kinds.push({
       kind,
       label: KIND_LABELS[kind] || kind,
-      active:   filterTopLevel(activeRows).map(r => _buildIndexRow(kind, r.id, { seen, ctx })).filter(Boolean),
-      archived: filterTopLevel(archivedRows).map(r => _buildIndexRow(kind, r.id, { seen: new Set(), ctx })).filter(Boolean),
+      active:   filterTopLevel(active).map(r => _buildIndexRow(kind, r.id, { seen, ctx })).filter(Boolean),
+      archived: includeArchived
+        ? filterTopLevel(archived).map(r => _buildIndexRow(kind, r.id, { seen: new Set(), ctx })).filter(Boolean)
+        : [],
     });
   }
   return { kinds };
@@ -4431,6 +4450,31 @@ function updatePage(id, { volume, page_number, captured_at } = {}) {
   return db.prepare(`SELECT * FROM pages WHERE id = ?`).get(id);
 }
 
+// --- Scribe promotion log ---
+// scribe_versions is a JSON array of { doc_id, title, created_at } rows,
+// one per POST /api/promote-to-scribe for this page. Stored on pages row so
+// the detail view can render a "Scribe versions: v1 · v2 · …" list without
+// a separate table (versions are always scoped to a page, never shared).
+
+function getPageScribeVersions(pageId) {
+  const row = db.prepare(`SELECT scribe_versions FROM pages WHERE id = ?`).get(pageId);
+  if (!row || !row.scribe_versions) return [];
+  try { const arr = JSON.parse(row.scribe_versions); return Array.isArray(arr) ? arr : []; }
+  catch { return []; }
+}
+
+function appendPageScribeVersion(pageId, version) {
+  if (!version || !version.doc_id) throw new Error('doc_id required');
+  const existing = getPageScribeVersions(pageId);
+  existing.push({
+    doc_id: String(version.doc_id),
+    title: version.title || '',
+    created_at: version.created_at || new Date().toISOString(),
+  });
+  db.prepare(`UPDATE pages SET scribe_versions = ? WHERE id = ?`).run(JSON.stringify(existing), pageId);
+  return existing;
+}
+
 // --- Remember feed ---
 
 // Return a single random page per band (year_ago, month_ago, week_ago), ± 3 days.
@@ -5533,7 +5577,7 @@ module.exports = {
   listEntitiesByKind, getOrCreateEntity, deleteRoleOrArea, listCollectionEntities,
   updateEntity, linkRoleToArea, unlinkRoleFromArea, listRolesWithAreas, listAreasWithRoles,
   moveEntityPriority,
-  updateCollection, updatePage,
+  updateCollection, updatePage, getPageScribeVersions, appendPageScribeVersion,
   insertLink,
   insertBacklogItems, getPendingBacklog, updateBacklogStatus, getBacklogItem,
   getRecentAnsweredQuestions,
