@@ -798,7 +798,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   letter-spacing: 0.04em;
 }
 .detail-head .sub .sub-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
-.detail-head .title.serif .editable {
+.detail-head .title .editable {
   font-family: inherit;
   letter-spacing: inherit;
   padding: 0 3px;
@@ -806,8 +806,8 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   cursor: text;
   transition: border-color var(--t), color var(--t);
 }
-.detail-head .title.serif .editable:hover { border-color: var(--ink-faint); color: var(--accent); }
-.detail-head .title.serif input.input { font: inherit; padding: 0 4px; min-width: 1.5ch; }
+.detail-head .title .editable:hover { border-color: var(--ink-faint); color: var(--accent); }
+.detail-head .title input.input { font: inherit; padding: 0 4px; min-width: 1.5ch; }
 
 .scan-frame {
   border: 1px solid var(--rule);
@@ -1391,30 +1391,24 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
   .stagger-in > * { animation: none !important; opacity: 1 !important; }
 }
 
-/* ── Serif content — strategic, only on text-rich "content" areas ───
-   UI chrome (labels, buttons, nav, meta) stays sans-serif. The serif
-   face gives page summaries, captions, and transcripts a reading-first
-   quality that Inter doesn't. Claude's content areas use the same trick. */
+/* ── Serif content — strategic, only on page body content ──
+   Same pattern Claude uses: the "reading" body gets serif; every piece of UI
+   chrome (labels, buttons, nav, meta, tile captions, section titles) stays
+   sans. In Gloss that's just the page-detail summary and the voice
+   transcript — the two places where you're reading the notebook's content,
+   not scanning a list. */
 .editable-text.summary,
-.spine-sum,
-.day-tile .captions,
-.voice-frame,
-.detail-head .title.serif,
-.cap-zone h3,
-.draft-tile-title,
-.surface-title {
+.voice-frame {
   font-family: var(--font-serif);
-  letter-spacing: -0.005em;
-  font-feature-settings: "kern", "liga", "ss01";
+  font-feature-settings: "kern", "liga";
+  letter-spacing: normal;
 }
 .editable-text.summary {
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--ink);
 }
-.spine-sum { font-size: 14.5px; line-height: 1.5; }
-.day-tile .captions { font-size: 14px; line-height: 1.55; letter-spacing: -0.003em; }
-.voice-frame { font-size: 14.5px; line-height: 1.65; }
+.voice-frame { font-size: 14.5px; line-height: 1.7; }
 
 /* ── Staggered list reveal ──────────────────────────────────────────
    Apply .stagger-in to a container; children fade-up with a 32-40ms
@@ -2969,7 +2963,7 @@ function renderPageDetail(p) {
   // Title: for notebook scans, vol + page are inline-editable right in the
   // heading — this is the single source of truth for that metadata (no
   // duplicated editable row below). For voice / markdown, a static label.
-  const titleEl = h('div', { class: 'title serif' });
+  const titleEl = h('div', { class: 'title' });
   if (isNotebookScan) {
     titleEl.append(
       'Vol ',
