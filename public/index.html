@@ -3418,7 +3418,73 @@ function renderPageDetail(p) {
   });
   section.appendChild(addBtn);
   body.appendChild(section);
+
+  // ── Scribe promotion ──────────────────────────────────────────────────────
+  // Create a versioned Scribe doc from this gloss page. Each click creates a
+  // new version (v1, v2, …) — existing versions are listed with links.
+  body.appendChild(renderScribePromotion(p));
+
   detailInner.appendChild(body);
+}
+
+// Render the "→ New Scribe version" button + the list of existing versions
+// for this page, populated from p._raw.scribe_versions (surfaced by the
+// /api/pages/:id/detail response).
+function renderScribePromotion(p) {
+  const section = h('div', { class: 'links-section', style: { marginTop: '22px' } });
+  section.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '10px' } }, 'Scribe'));
+
+  const versions = (p._raw && Array.isArray(p._raw.scribe_versions)) ? p._raw.scribe_versions.slice() : [];
+  const list = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' } });
+
+  const renderVersions = (scribeBase) => {
+    list.innerHTML = '';
+    if (!versions.length) {
+      list.appendChild(h('span', { class: 'soft', style: { fontSize: '12.5px' } }, 'No versions yet.'));
+      return;
+    }
+    versions.forEach((v, i) => {
+      const label = `v${i + 1}`;
+      const href = scribeBase ? `${scribeBase.replace(/\/$/, '')}/d/${v.doc_id}` : null;
+      const chip = href
+        ? h('a', { class: 'chip', href, target: '_blank', rel: 'noopener', title: v.title || '' }, label)
+        : h('span', { class: 'chip', title: v.title || '' }, label);
+      list.appendChild(chip);
+    });
+  };
+  renderVersions(null);
+
+  const promoteBtn = h('button', { class: 'btn' }, '→ New Scribe version');
+  const status = h('span', { class: 'mono soft', style: { marginLeft: '10px', fontSize: '12px' } }, '');
+  promoteBtn.addEventListener('click', async () => {
+    promoteBtn.disabled = true;
+    status.textContent = 'Promoting…';
+    try {
+      const res = await api('/api/promote-to-scribe', 'POST', { page_id: p.id });
+      versions.length = 0;
+      (res.scribe_versions || []).forEach(v => versions.push(v));
+      // Re-render chips now that we know the scribe base (it's embedded in scribe_url).
+      const base = res.scribe_url ? res.scribe_url.replace(/\/d\/[^/]+$/, '') : null;
+      renderVersions(base);
+      status.textContent = `Opened ${res.title || 'new version'}`;
+      if (res.scribe_url) window.open(res.scribe_url, '_blank', 'noopener');
+      toast('Promoted to Scribe', 'ok');
+    } catch (err) {
+      status.textContent = '';
+      toast(err.message, 'err');
+    } finally {
+      promoteBtn.disabled = false;
+    }
+  });
+
+  // If suite-config exposes scribe_url, pre-wire the existing version chips so
+  // they're clickable without requiring the user to trigger a promotion first.
+  api('/api/suite-config').then(cfg => {
+    if (cfg && cfg.scribe_url) renderVersions(cfg.scribe_url);
+  }).catch(() => {});
+
+  section.append(list, h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap' } }, promoteBtn, status));
+  return section;
 }
 
 // ─── CAPTURE ──────────────────────────────

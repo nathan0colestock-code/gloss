@@ -3829,7 +3829,83 @@ app.get('/api/pages/:id/transcript', (req, res) => {
 app.get('/api/pages/:id/detail', (req, res) => {
   const detail = db.getPageDetail(req.params.id);
   if (!detail) return res.status(404).json({ error: 'Not found' });
+  // Surface any previously-promoted Scribe doc ids so the detail view can show
+  // "Scribe versions: v1 · v2 · …" without a second round-trip.
+  try { detail.scribe_versions = db.getPageScribeVersions(req.params.id); } catch { detail.scribe_versions = []; }
   res.json(detail);
+});
+
+// ── Promote a gloss page to a new Scribe document ───────────────────────────
+// Loads the page, POSTs to scribe's /api/documents with a {source} field that
+// identifies this gloss page, and records the returned doc_id on the page's
+// scribe_versions log. Returns { scribe_url } so the client can open the new
+// doc in a new tab.
+//
+// Auth: uses the suite-wide API_KEY / SUITE_API_KEY bearer when calling
+// scribe, matching the other cross-app HTTP calls in this app. If SCRIBE_URL
+// isn't configured, fails with a clear error (no silent no-op).
+app.post('/api/promote-to-scribe', async (req, res) => {
+  const { page_id } = req.body || {};
+  if (!page_id) return res.status(400).json({ error: 'page_id required' });
+  const scribeBase = process.env.SCRIBE_URL;
+  if (!scribeBase) return res.status(503).json({ error: 'SCRIBE_URL is not configured' });
+
+  const page = db.getPage(page_id);
+  if (!page) return res.status(404).json({ error: 'page not found' });
+
+  const existing = db.getPageScribeVersions(page_id);
+  const versionNum = existing.length + 1;
+  const summary = page.summary || '';
+  const title = `v${versionNum} — ${summary || `Gloss page ${page.page_number || page_id.slice(0, 8)}`}`;
+  const host = req.get('host') || '';
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const gloss_url = host ? `${proto}://${host}/#/page/${page_id}` : null;
+
+  const payload = {
+    title,
+    description: summary,
+    main_point: '',
+    // Coordinated with Agent 5 — scribe may or may not yet persist this field.
+    // Sending it is safe either way: unknown fields in req.body are ignored by
+    // scribe's documents.POST handler.
+    source: { kind: 'gloss', page_id, gloss_url },
+  };
+
+  const headers = { 'Content-Type': 'application/json' };
+  const bearer = process.env.API_KEY || process.env.SUITE_API_KEY;
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+
+  let scribeResp;
+  try {
+    scribeResp = await fetch(`${scribeBase.replace(/\/$/, '')}/api/documents`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    return res.status(502).json({ error: 'scribe unreachable', detail: err.message });
+  }
+  if (!scribeResp.ok) {
+    const body = await scribeResp.text().catch(() => '');
+    return res.status(502).json({ error: 'scribe rejected the request', status: scribeResp.status, detail: body.slice(0, 500) });
+  }
+  let docJson;
+  try { docJson = await scribeResp.json(); }
+  catch (err) { return res.status(502).json({ error: 'scribe returned non-JSON', detail: err.message }); }
+
+  const doc = docJson && docJson.document;
+  if (!doc || !doc.id) return res.status(502).json({ error: 'scribe response missing document.id' });
+
+  const version = { doc_id: doc.id, title: doc.title || title, created_at: doc.created_at || new Date().toISOString() };
+  try { db.appendPageScribeVersion(page_id, version); } catch (e) { console.warn('scribe version log failed:', e.message); }
+
+  res.json({
+    ok: true,
+    scribe_url: `${scribeBase.replace(/\/$/, '')}/d/${doc.id}`,
+    doc_id: doc.id,
+    title: doc.title || title,
+    scribe_versions: db.getPageScribeVersions(page_id),
+  });
 });
 
 // ── Phase 1.5: Unified page-context dispatcher ──────────────────────────────

@@ -236,6 +236,10 @@ ensureColumn('pages', 'continued_to',   'INTEGER');
 // underlying scan file on disk is never modified. See rotatePage() / setPageRotation().
 ensureColumn('pages', 'rotation', 'INTEGER DEFAULT 0');
 ensureColumn('pages', 'deleted_at', 'TEXT');
+// Scribe promotion log — JSON array of { doc_id, title, created_at } rows,
+// one per successful POST /api/promote-to-scribe for this page. Shown on the
+// page detail view so the user can jump back to every Scribe version.
+ensureColumn('pages', 'scribe_versions', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS ix_pages_vol_pagenum ON pages(volume, page_number)');
 ensureColumn('links', 'role_summary', 'TEXT');
 ensureColumn('collections', 'summary', 'TEXT');
@@ -4446,6 +4450,31 @@ function updatePage(id, { volume, page_number, captured_at } = {}) {
   return db.prepare(`SELECT * FROM pages WHERE id = ?`).get(id);
 }
 
+// --- Scribe promotion log ---
+// scribe_versions is a JSON array of { doc_id, title, created_at } rows,
+// one per POST /api/promote-to-scribe for this page. Stored on pages row so
+// the detail view can render a "Scribe versions: v1 · v2 · …" list without
+// a separate table (versions are always scoped to a page, never shared).
+
+function getPageScribeVersions(pageId) {
+  const row = db.prepare(`SELECT scribe_versions FROM pages WHERE id = ?`).get(pageId);
+  if (!row || !row.scribe_versions) return [];
+  try { const arr = JSON.parse(row.scribe_versions); return Array.isArray(arr) ? arr : []; }
+  catch { return []; }
+}
+
+function appendPageScribeVersion(pageId, version) {
+  if (!version || !version.doc_id) throw new Error('doc_id required');
+  const existing = getPageScribeVersions(pageId);
+  existing.push({
+    doc_id: String(version.doc_id),
+    title: version.title || '',
+    created_at: version.created_at || new Date().toISOString(),
+  });
+  db.prepare(`UPDATE pages SET scribe_versions = ? WHERE id = ?`).run(JSON.stringify(existing), pageId);
+  return existing;
+}
+
 // --- Remember feed ---
 
 // Return a single random page per band (year_ago, month_ago, week_ago), ± 3 days.
@@ -5548,7 +5577,7 @@ module.exports = {
   listEntitiesByKind, getOrCreateEntity, deleteRoleOrArea, listCollectionEntities,
   updateEntity, linkRoleToArea, unlinkRoleFromArea, listRolesWithAreas, listAreasWithRoles,
   moveEntityPriority,
-  updateCollection, updatePage,
+  updateCollection, updatePage, getPageScribeVersions, appendPageScribeVersion,
   insertLink,
   insertBacklogItems, getPendingBacklog, updateBacklogStatus, getBacklogItem,
   getRecentAnsweredQuestions,
