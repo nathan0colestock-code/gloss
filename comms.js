@@ -32,6 +32,11 @@ function disabledReason() {
 // Build the array of contact payloads from the current DB state.
 // Only priority >= 1 people are pushed — Comms' nudge + highlight logic is
 // built around priority, and pushing everyone would drown the UI.
+//
+// Payload shape is the contract in comms/collect.js:upsertGlossContact and
+// comms/public/index.html renderContactDetail:
+//   recent_context:    [{ date, role_summary, collection }]    (objects)
+//   linked_collections: [string]                                 (titles)
 function buildContactsPayload() {
   const origin = publicOrigin();
   const people = db.listPeople();
@@ -45,20 +50,31 @@ function buildContactsPayload() {
       .map(s => s.trim())
       .filter(Boolean);
 
+    // Prefer topical collections for captions; the generic-kinds (project,
+    // monthly/future_log) are structural and don't read well as "why is this
+    // person in your notebook" labels.
+    const topicalCollections = (p.collections || [])
+      .filter(c => c && c.title && (!c.kind || c.kind === 'topical'));
+    const fallbackCollection = topicalCollections[0]?.title || null;
+
+    // Per-page structured context. role_summary > summary; date comes from
+    // the daily_log if the page was filed to one, else the captured_at day.
     const recent_context = [];
     for (const pg of (p.pages || []).slice(0, 5)) {
       const mentions = Array.isArray(pg.person_mentions) ? pg.person_mentions.filter(Boolean) : [];
-      const snippet = mentions[0] || pg.summary || null;
-      if (!snippet) continue;
-      const volPg = pg.volume && pg.page_number ? `v.${pg.volume} p.${pg.page_number}` : null;
-      recent_context.push(volPg ? `${volPg} · ${snippet}` : snippet);
+      const role_summary = mentions[0] || pg.summary || null;
+      if (!role_summary) continue;
+      const date = pg.daily_log_date || (pg.captured_at ? pg.captured_at.slice(0, 10) : null);
+      recent_context.push({
+        date,
+        role_summary,
+        collection: fallbackCollection,
+      });
     }
 
-    const linked_collections = (p.collections || []).map(c => ({
-      id: c.id,
-      title: c.title,
-      kind: c.kind,
-    }));
+    // linked_collections: Comms UI renders these as plain chips (string titles).
+    // Topical-only so we don't leak project/monthly-log chrome.
+    const linked_collections = topicalCollections.map(c => c.title);
 
     payload.push({
       contact: p.label,

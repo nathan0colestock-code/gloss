@@ -1,8 +1,8 @@
-# CLAUDE.md — Foxed
+# CLAUDE.md — Gloss
 
 ## For agents working in parallel
 
-This repo has three load-bearing files that nearly every change touches: `server.js` (~3300 lines), `db.js` (~4700 lines), `public/index.html` (~9700 lines, one file). If two agents work at once, coordinate by **vertical slice, not by file**:
+This repo has three load-bearing files that nearly every change touches: `server.js` (~4500 lines), `db.js` (~5700 lines), `public/index.html` (~4100 lines, one file). If two agents work at once, coordinate by **vertical slice, not by file**:
 
 - One agent owns the feature end-to-end (db helper + endpoint + UI wiring). Don't split "agent A writes the SQL, agent B writes the UI" — the contract drifts.
 - The frontend has its own scoped notes: see [public/CLAUDE.md](public/CLAUDE.md).
@@ -12,18 +12,20 @@ This repo has three load-bearing files that nearly every change touches: `server
 
 ## What this is
 
-Foxed is a single-user, local-first companion to a paper bullet-journal. The user scans notebook spreads (single images or multi-page PDFs) or pastes voice-memo transcripts. Gemini (NOT Anthropic — the README / comments lie about this; see `ai.js`) parses each logical page into a `pages` row, `items` rows (pointer-summaries, never verbatim), and entity/hint bundles. The server is Node + Express + `better-sqlite3` (WAL, FTS5). The UI is one vanilla-JS file: `public/index.html`. No framework, no build step, no tests.
+Gloss (the repo is called `foxed` for historical reasons) is a single-user, local-first companion to a paper bullet-journal. The user scans notebook spreads (single images or multi-page PDFs) or pastes voice-memo transcripts. Gemini parses each logical page into a `pages` row, `items` rows (pointer-summaries, never verbatim), and entity/hint bundles. The server is Node + Express + `better-sqlite3` (WAL, FTS5). The UI is one vanilla-JS file: `public/index.html`. No framework, no build step. Tests live under `tests/` (node:test, real sqlite).
 
-Invariant above all invariants: **the notebook is sovereign**. Nothing stored in Foxed may quote the user's prose verbatim — every `items.text`, `page.summary`, `link.role_summary` is a pointer-summary. `pages.raw_ocr_text` is the one place raw text lives and it must never reach the UI except via `/api/pages/:id/transcript`.
+Invariant above all invariants: **the notebook is sovereign**. Nothing stored in Gloss may quote the user's prose verbatim — every `items.text`, `page.summary`, `link.role_summary` is a pointer-summary. `pages.raw_ocr_text` is the one place raw text lives and it must never reach the UI except via `/api/pages/:id/transcript`.
 
 ## Repo layout
 
 ```
-server.js        ~2900 lines — HTTP, ingest pipeline, Google fetch, re-examine, chat assistant, planning hub
-db.js            ~3900 lines — schema + every data function (no ORM); rocks/habits/chat tables
-ai.js            ~640  lines — Gemini calls (parse / reexamine / voice / probe / chatWithActions)
-google.js        ~220  lines — OAuth + Docs/Drive text export
-public/index.html ~8400 lines — the entire frontend, one file
+server.js        ~4500 lines — HTTP, ingest pipeline, Google fetch, re-examine, chat assistant, planning hub
+db.js            ~5700 lines — schema + every data function (no ORM); rocks/habits/chat tables
+ai.js            ~1100 lines — Gemini calls (parse / reexamine / voice / probe / chatWithActions / classifier / index suggest)
+google.js        ~340  lines — OAuth + Docs/Drive text export
+comms.js         ~145  lines — optional push of priority people to the Comms app
+public/index.html ~4100 lines — the entire frontend, one file
+tests/           — node:test suite; runs with real sqlite files under data/test-*.db
 seed-compass.js  — one-shot seed script for initial values rows
 data/foxed.db    — SQLite (WAL)
 data/scans/      — every uploaded page image / PDF-rendered PNG
@@ -136,7 +138,7 @@ Purpose: user-curated cross-cuts. Each user_index has an optional `query` string
 Invariant: `user_indexes.title UNIQUE COLLATE NOCASE`. Deleting a user_index first deletes its `index_entries`. A manual entry can have `page_id` or `item_id` or both null-ish; tolerate all three.
 
 ### Refine (free-form hint → reexamine)
-Purpose: the user tells Foxed something Gemini missed (e.g. "J— is Jake Thompson" or "this page is about sabbath not productivity"). `reexaminePageInBackground` re-runs Gemini over the scan with that hint + current known entities, applies rename/replace/summary revisions, and links any newly-confident entities. Triggered on two paths: explicit `/api/pages/:id/refine`, and when a backlog question is answered.
+Purpose: the user tells Gloss something Gemini missed (e.g. "J— is Jake Thompson" or "this page is about sabbath not productivity"). `reexaminePageInBackground` re-runs Gemini over the scan with that hint + current known entities, applies rename/replace/summary revisions, and links any newly-confident entities. Triggered on two paths: explicit `/api/pages/:id/refine`, and when a backlog question is answered.
 Invariant: reexamine is best-effort and must never throw to the caller — internal try/catch wraps everything. The `newlyConfirmed` argument is either `{kind:'hint', label:<string>}` (free-form) or `{kind:'person'|'scripture'|'topic', label:<string>}` (augment).
 
 ### Chat (`/api/chat`)
@@ -250,6 +252,6 @@ The flow from "user dropped a scan" to "pages exist in the DB with entities, col
 ## TODO(intent) for the user
 
 - `TODO(intent): ask user` — should `deletePagesByScanPath` (re-parse scan) also cascade-delete `index_entries.page_id` rows that reference the deleted pages? Currently they dangle.
-- `TODO(intent): ask user` — `ai.js` and `CHAT_SYSTEM` / `PARSE_SYSTEM` say "Claude" in comments but the actual SDK is Gemini. Is the Anthropic SDK planned, or should all mentions of Claude in code comments be updated to Gemini?
+- ~~`ai.js` / prompts say "Claude"~~ — cleaned up; all mentions in code comments now correctly reference Gemini.
 - ~~rename/merge paths do not dedupe~~ — addressed in Phase 3 via `renameOrMergeEntity` which DELETEs duplicate `(from_type, from_id, to_type, to_id)` rows after the bulk UPDATE.
 - ~~references missing `linked_indexes`~~ — addressed in Phase 5; `POST /api/references/:id/links` now accepts `to_type=user_index` and the GET response includes `linked_indexes`.

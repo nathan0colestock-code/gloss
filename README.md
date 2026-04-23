@@ -73,6 +73,28 @@ See [`.env.example`](.env.example) for all options. Required:
 
 ---
 
+## Comms integration (optional)
+
+If you also run [Comms](../comms) — the iMessage + Gmail + Calendar
+aggregator — Gloss can push priority people (anyone with
+`priority >= 1` on their profile) to it on a 15-minute interval. Comms
+uses the push to show per-person notebook context, generate AI
+insights, and prep meeting briefs for calendar events whose attendees
+appear in your notebook.
+
+Enable by setting both variables in `.env`:
+
+```
+COMMS_URL=http://localhost:3748
+COMMS_API_KEY=<bearer key from Comms .env>
+```
+
+A small `comms` pill appears in the sidebar when the push is
+configured — green for recent success, amber for stale, red for last
+error. `/api/comms/status` exposes the same snapshot as JSON.
+
+---
+
 ## One-shot seed scripts
 
 Run these once on a fresh database (start the server first so the DB file is created):
