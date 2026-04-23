@@ -94,6 +94,11 @@ function buildContactsPayload() {
 }
 
 // POST the payload. Returns { ok, saved, errors } from Comms, or throws.
+//
+// Outbound auth follows the suite-wide standard: `Authorization: Bearer <key>`.
+// Inbound endpoints across the suite remain backwards-compatible with the
+// legacy `X-API-Key` header, but new callers (including this one) always
+// use Bearer.
 async function pushContactsToComms(contacts) {
   if (!isEnabled()) throw new Error(`comms push disabled: ${disabledReason()}`);
   const url = `${commsUrl()}/api/gloss/contacts`;
