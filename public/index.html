@@ -351,6 +351,14 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   color: var(--ink);
 }
 .cap-zone .sub { color: var(--ink-soft); font-size: 12.5px; margin-bottom: 14px; }
+.md-draft-list { margin-top: 12px; }
+.day-tile.draft-tile { grid-template-columns: 1fr; }
+.draft-tile-title { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.draft-tile-preview { font-size: 12.5px; color: var(--ink-soft); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.md-draft-empty { color: var(--ink-faint); font-size: 12.5px; font-family: var(--font-mono); padding: 8px 0; }
+.draft-detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.draft-detail-header .spacer { flex: 1; }
+.draft-detail-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
 .gc-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
 .gc-row:last-child { border-bottom: none; }
 .gc-row .gc-title { flex: 1; font-size: 13px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1388,65 +1396,11 @@ lb.addEventListener('click', (e) => {
   }
 });
 
-// Markdown composer — a small modal used by the tree drawer's "+ New markdown"
-// button. The capture tab has its own inline composer; this one pops over
-// whatever surface the user is on so they don't lose context.
-function openMarkdownComposer({ onFiled } = {}) {
-  const backdrop = h('div', { style: {
-    position: 'fixed', inset: '0', background: 'rgba(15,12,9,0.55)',
-    zIndex: '500', display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-    paddingTop: '6vh', backdropFilter: 'blur(4px)',
-  }});
-  const panel = h('div', { style: {
-    background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 'var(--r)',
-    width: 'min(820px, 92vw)', maxHeight: '86vh', display: 'flex', flexDirection: 'column',
-    boxShadow: 'var(--shadow-card)', padding: '20px 22px 18px',
-  }});
-  const title = h('div', { style: { fontFamily: 'var(--font-mono)', fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: '10px' } }, 'New markdown note');
-  const date = h('input', { type: 'date', class: 'input', value: todayIso(), style: { maxWidth: '180px' } });
-  const text = h('textarea', {
-    class: 'input',
-    rows: 14,
-    placeholder: '# Title of the note\n\nYour thoughts here. Markdown renders in mono.\n\n- a list item\n- [ ] a task\n- [x] a done task\n\n> a quoted line\n',
-    style: { fontFamily: 'var(--font-mono)', fontSize: '12.5px', marginTop: '10px', resize: 'vertical' },
-  });
-  const cancel = h('button', { class: 'btn' }, 'Cancel');
-  const file = h('button', { class: 'btn primary' }, 'File markdown');
-  const actions = h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' } }, cancel, file);
-
-  panel.append(
-    title,
-    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
-      h('span', { class: 'lbl-mono' }, 'Date'), date,
-    ),
-    text, actions,
-  );
-  backdrop.appendChild(panel);
-  document.body.appendChild(backdrop);
-
-  const close = () => backdrop.remove();
-  cancel.addEventListener('click', close);
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-  const escHandler = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); } };
-  document.addEventListener('keydown', escHandler);
-
-  file.addEventListener('click', async () => {
-    const t = text.value.trim();
-    if (!t) { toast('Nothing to file', 'err'); return; }
-    file.disabled = true; file.textContent = 'Parsing…';
-    try {
-      const res = await api('/api/ingest/markdown', 'POST', { markdown: t, date: date.value });
-      toast(`Filed to ${date.value}`, 'ok');
-      close();
-      if (typeof onFiled === 'function') onFiled(res);
-      if (res && res.page_id) openPageDetail(res.page_id);
-    } catch (err) {
-      toast(err.message, 'err');
-      file.disabled = false; file.textContent = 'File markdown';
-    }
-  });
-
-  setTimeout(() => text.focus(), 20);
+// Opens a new markdown draft in the capture surface. Used by the tree drawer
+// "+ New markdown" button — creates a blank draft then navigates to Capture.
+async function openMarkdownComposer() {
+  await api('/api/markdown-drafts', 'POST', { content: '', date: todayIso() });
+  navigate('capture');
 }
 
 // ─── Editable helpers ──────────────────────
@@ -2199,40 +2153,149 @@ async function renderCapture() {
   );
   grid.appendChild(voiceZone);
 
-  // Markdown — user-authored note, parsed like a scan, rendered in mono.
+  // Markdown drafts — list of uncommitted notes. Clicking a row opens the editor
+  // in the right-side detail panel. Committed notes are immutable (parsed by Gemini).
   const mdZone = h('div', { class: 'cap-zone' });
   mdZone.appendChild(h('h3', null, 'Markdown'));
-  mdZone.appendChild(h('div', { class: 'sub' }, 'Write a note in markdown. Parsed into pointer-summaries and filed to the day (or to a collection derived from the title).'));
-  const mdDate = h('input', { type: 'date', class: 'input', value: todayIso(), style: { maxWidth: '180px' } });
-  const mdText = h('textarea', {
-    class: 'input',
-    rows: 8,
-    placeholder: '# On catechesis\n\nScaffolding, not cage. Three notes:\n\n- formation moves slow\n- repetition is not rote\n- the liturgy teaches',
-    style: { marginTop: '10px', fontFamily: 'var(--font-mono)', fontSize: '12.5px' },
+  mdZone.appendChild(h('div', { class: 'sub' }, 'Write notes in markdown. Drafts are editable until committed — committing parses them like a scan and files them permanently.'));
+
+  const newDraftBtn = h('button', { class: 'btn' }, '+ New note');
+  const draftList = h('div', { class: 'md-draft-list' });
+
+  async function loadMdDrafts() {
+    await refreshDraftList(draftList, streamHost);
+  }
+
+  newDraftBtn.addEventListener('click', async () => {
+    const draft = await api('/api/markdown-drafts', 'POST', { content: '', date: todayIso() });
+    await refreshDraftList(draftList, streamHost);
+    openDraftDetail(draft.id, draftList, streamHost);
   });
-  const mdBtn = h('button', { class: 'btn primary', style: { marginTop: '12px' } }, 'File markdown');
-  mdBtn.addEventListener('click', async () => {
-    const t = mdText.value.trim();
-    if (!t) { toast('Nothing to file', 'err'); return; }
-    try {
-      mdBtn.disabled = true;
-      mdBtn.textContent = 'Parsing…';
-      const res = await api('/api/ingest/markdown', 'POST', { markdown: t, date: mdDate.value });
-      toast(`Filed to ${mdDate.value}`, 'ok');
-      mdText.value = '';
-      await loadBacklog(streamHost);
-      if (res && res.page_id) openPageDetail(res.page_id);
-    } catch (err) { toast(err.message, 'err'); }
-    finally { mdBtn.disabled = false; mdBtn.textContent = 'File markdown'; }
-  });
-  mdZone.append(
-    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
-      h('span', { class: 'lbl-mono' }, 'Date'),
-      mdDate,
-    ),
-    mdText, mdBtn,
-  );
+
+  mdZone.append(newDraftBtn, draftList);
   grid.appendChild(mdZone);
+  loadMdDrafts();
+}
+
+async function refreshDraftList(listEl, backlogHost) {
+  const drafts = await api('/api/markdown-drafts');
+  listEl.innerHTML = '';
+  if (drafts.length === 0) {
+    listEl.appendChild(h('div', { class: 'md-draft-empty' }, 'No drafts yet.'));
+    return;
+  }
+  drafts.forEach(d => {
+    const lines = (d.content || '').split('\n').filter(l => l.trim());
+    const firstLine = lines[0] || '';
+    const title = firstLine.replace(/^#+\s*/, '').trim() || '(empty)';
+    const preview = lines.slice(1).join(' ').replace(/^[-*>]+\s*/gm, '').trim();
+    const tile = h('div', { class: 'day-tile draft-tile' },
+      h('div', { class: 'tile-body' },
+        h('div', { class: 'draft-tile-title' }, title),
+        preview ? h('div', { class: 'draft-tile-preview' }, preview) : null,
+        h('div', { class: 'tile-meta' }, d.date + ' · draft'),
+      ),
+    );
+    tile.addEventListener('click', () => openDraftDetail(d.id, listEl, backlogHost));
+    listEl.appendChild(tile);
+  });
+}
+
+// Opens a draft in the right-side detail panel for editing.
+// listEl and backlogHost are refs so we can refresh the list after commit/discard.
+function openDraftDetail(draftId, listEl, backlogHost) {
+  openDetail();
+  detailInner.innerHTML = '';
+  detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
+
+  api('/api/markdown-drafts/' + draftId).then(draft => {
+    if (!draft) { detailInner.innerHTML = ''; detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Draft not found.')); return; }
+
+    detailInner.innerHTML = '';
+    const body = h('div', { style: { padding: '20px 24px' } });
+
+    body.appendChild(h('div', { class: 'detail-label', style: { marginBottom: '14px' } }, 'Draft'));
+
+    const dateIn = h('input', { type: 'date', class: 'input', value: draft.date, style: { maxWidth: '180px' } });
+    const ta = h('textarea', {
+      class: 'input',
+      rows: 20,
+      placeholder: '# On catechesis\n\nScaffolding, not cage. Three notes:\n\n- formation moves slow\n- repetition is not rote\n- the liturgy teaches',
+      style: { fontFamily: 'var(--font-mono)', fontSize: '12.5px', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
+    });
+    ta.value = draft.content;
+
+    let saveTimer;
+    const save = () => {
+      clearTimeout(saveTimer);
+      return api('/api/markdown-drafts/' + draft.id, 'PATCH', { content: ta.value, date: dateIn.value }).catch(() => {});
+    };
+    // Debounce on input; save immediately on blur so closing the panel never loses content
+    ta.addEventListener('input', () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(save, 600);
+    });
+    ta.addEventListener('blur', save);
+    dateIn.addEventListener('change', save);
+
+    // Collection picker — optional, chosen before commit
+    let selectedCollection = null; // { id, label }
+    const collBtn = h('button', { class: 'btn', style: { maxWidth: '100%', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, 'None');
+    collBtn.addEventListener('click', () => {
+      openTypeahead({
+        anchor: collBtn,
+        kinds: ['collection'],
+        allowCreate: false,
+        placeholder: 'Search collections…',
+        onPick: (item) => {
+          if (item) { selectedCollection = { id: item.id, label: item.label }; collBtn.textContent = item.label; }
+          else { selectedCollection = null; collBtn.textContent = 'None'; }
+        },
+      });
+    });
+
+    const commitBtn = h('button', { class: 'btn primary' }, 'Commit');
+    const discardBtn = h('button', { class: 'btn' }, 'Discard');
+
+    commitBtn.addEventListener('click', async () => {
+      clearTimeout(saveTimer);
+      if (!ta.value.trim()) { toast('Draft is empty', 'err'); return; }
+      commitBtn.disabled = true; commitBtn.textContent = 'Parsing…';
+      try {
+        await save();
+        const res = await api('/api/markdown-drafts/' + draft.id + '/commit', 'POST', {
+          collection_id: selectedCollection ? selectedCollection.id : null,
+        });
+        toast(`Filed to ${dateIn.value}`, 'ok');
+        closeDetail();
+        if (listEl) await refreshDraftList(listEl, backlogHost);
+        if (backlogHost) await loadBacklog(backlogHost);
+        if (res && res.page_id) openPageDetail(res.page_id);
+      } catch (err) {
+        toast(err.message, 'err');
+        commitBtn.disabled = false; commitBtn.textContent = 'Commit';
+      }
+    });
+
+    discardBtn.addEventListener('click', async () => {
+      if (!confirm('Discard this draft?')) return;
+      await api('/api/markdown-drafts/' + draft.id, 'DELETE');
+      closeDetail();
+      if (listEl) await refreshDraftList(listEl, backlogHost);
+    });
+
+    body.append(
+      h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
+      ta,
+      h('div', { class: 'meta-row', style: { marginTop: '14px' } },
+        h('span', { class: 'lbl-mono' }, 'Collection'),
+        collBtn,
+      ),
+      h('div', { class: 'draft-detail-actions' }, discardBtn, commitBtn),
+    );
+    detailInner.appendChild(body);
+    setTimeout(() => ta.focus(), 50);
+  });
 }
 
 async function startScanIngest(file, kindHint, host) {
@@ -2451,17 +2514,6 @@ async function renderIndex(focusKind, focusId) {
         } catch (err) { toast(err.message, 'err'); }
       });
       toolbar.appendChild(btn);
-    }
-    // Collections index also gets "+ New markdown" — a user-authored note filed
-    // the same way as a scan or voice memo. Gemini derives the collection hint
-    // from the first heading, so a new markdown note typically spawns or joins
-    // a topical collection right away.
-    if (kind === 'collection') {
-      const mdBtn = h('button', { class: 'btn sm' }, '+ New markdown');
-      mdBtn.addEventListener('click', () => openMarkdownComposer({
-        onFiled: () => { invalidateIndexCache(); mainInner.innerHTML = ''; renderIndex(kind); },
-      }));
-      toolbar.appendChild(mdBtn);
     }
     if (toolbar.children.length) host.appendChild(toolbar);
 

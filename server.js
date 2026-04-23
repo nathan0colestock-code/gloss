@@ -466,6 +466,92 @@ app.post('/api/ingest/voice', async (req, res) => {
   }
 });
 
+// Markdown drafts — saved locally, not yet committed through the AI pipeline.
+// Creating or updating a draft is instant (no Gemini call). Committing triggers
+// the same parse pipeline as /api/ingest/markdown, then deletes the draft row.
+app.get('/api/markdown-drafts', (req, res) => {
+  res.json(db.listMarkdownDrafts());
+});
+
+app.post('/api/markdown-drafts', (req, res) => {
+  const { content = '', date } = req.body || {};
+  const isoDate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    ? date
+    : new Date().toISOString().slice(0, 10);
+  const draft = db.createMarkdownDraft({ id: crypto.randomUUID(), content, date: isoDate });
+  res.json(draft);
+});
+
+app.get('/api/markdown-drafts/:id', (req, res) => {
+  const draft = db.getMarkdownDraft(req.params.id);
+  if (!draft) return res.status(404).json({ error: 'not found' });
+  res.json(draft);
+});
+
+app.patch('/api/markdown-drafts/:id', (req, res) => {
+  const { content, date } = req.body || {};
+  const draft = db.updateMarkdownDraft(req.params.id, { content, date });
+  if (!draft) return res.status(404).json({ error: 'not found' });
+  res.json(draft);
+});
+
+app.delete('/api/markdown-drafts/:id', (req, res) => {
+  db.deleteMarkdownDraft(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/markdown-drafts/:id/commit', async (req, res) => {
+  const draft = db.getMarkdownDraft(req.params.id);
+  if (!draft) return res.status(404).json({ error: 'not found' });
+  const trimmed = draft.content.trim();
+  if (!trimmed) return res.status(400).json({ error: 'draft is empty' });
+  const collectionId = (req.body && req.body.collection_id) || null;
+  try {
+    const recentAnswered = db.getRecentAnsweredQuestions(150);
+    const knownAliases = db.getKnownAliases();
+    const notebookGlossary = db.getGlossary();
+    const priorContext = buildPriorContext(db.getRecentPagesForContext(null, null, 5));
+    const parsed = await parseMarkdownPage(trimmed, {
+      recentAnsweredQuestions: recentAnswered,
+      knownAliases,
+      notebookGlossary,
+      priorContext,
+      userDate: draft.date,
+      userTitle: null,
+    });
+    const pageObj = (parsed.pages && parsed.pages[0]) || {};
+    pageObj.raw_ocr_text = trimmed;
+    pageObj.volume = null;
+    pageObj.page_number = null;
+    pageObj.continued_from = null;
+    pageObj.continued_to = null;
+    const scanRelPath = `markdown:${crypto.randomUUID()}`;
+    const result = savePageFromParse(pageObj, scanRelPath, null, 1, { sourceKindOverride: 'markdown' });
+    try { db.updatePage(result.page_id, { captured_at: `${draft.date}T12:00:00` }); } catch {}
+    let dl = db.findDailyLogByDate(draft.date);
+    if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: draft.date });
+    try { db.linkPageToDailyLog(result.page_id, dl.id, 1.0); } catch {}
+    if (collectionId) {
+      try { db.linkPageToCollection(result.page_id, collectionId, 1.0); } catch {}
+    }
+    setImmediate(() => classifyPageForIndexesInBackground(result.page_id));
+    db.deleteMarkdownDraft(draft.id);
+    res.json({
+      ok: true,
+      page_id: result.page_id,
+      date: draft.date,
+      summary: result.summary,
+      items_count: result.items_count,
+      backlog_count: result.backlog_count,
+      collections: result.collections,
+      daily_log: { id: dl.id, date: draft.date },
+    });
+  } catch (err) {
+    console.error('markdown draft commit failed:', err);
+    res.status(500).json({ error: 'Commit failed', detail: err.message });
+  }
+});
+
 // Markdown ingest: paste markdown, it goes through the same pipeline as a scan
 // (Gemini parse → savePageFromParse) so collection/book/artifact/reference hints,
 // threading, entity extraction, backlog questions, and index classification all

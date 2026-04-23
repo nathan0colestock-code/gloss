@@ -192,6 +192,13 @@ db.exec(`
     created_at TEXT NOT NULL,
     retried_at TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS markdown_drafts (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL DEFAULT '',
+    date TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Idempotent migration: add question-answer columns if they don't exist
@@ -5524,4 +5531,33 @@ module.exports = {
   addUserIndexInclusion, removeUserIndexInclusion,
   purgeUserIndexFilters, purgeAutoUserIndexExclusions,
   getCrossKindContent, refreshContentHash, markLinksClassified, listCrossKindCandidates,
+  // Markdown drafts
+  createMarkdownDraft, listMarkdownDrafts, getMarkdownDraft, updateMarkdownDraft, deleteMarkdownDraft,
 };
+
+// ─── Markdown drafts ────────────────────────────────────────────────────────
+function createMarkdownDraft({ id, content = '', date }) {
+  db.prepare(`INSERT INTO markdown_drafts(id, content, date, created_at) VALUES (?, ?, ?, datetime('now'))`).run(id, content, date);
+  return db.prepare('SELECT * FROM markdown_drafts WHERE id = ?').get(id);
+}
+
+function listMarkdownDrafts() {
+  return db.prepare('SELECT * FROM markdown_drafts ORDER BY created_at DESC').all();
+}
+
+function getMarkdownDraft(id) {
+  return db.prepare('SELECT * FROM markdown_drafts WHERE id = ?').get(id);
+}
+
+function updateMarkdownDraft(id, { content, date }) {
+  const draft = db.prepare('SELECT * FROM markdown_drafts WHERE id = ?').get(id);
+  if (!draft) return null;
+  const newContent = content !== undefined ? content : draft.content;
+  const newDate = date !== undefined ? date : draft.date;
+  db.prepare('UPDATE markdown_drafts SET content = ?, date = ? WHERE id = ?').run(newContent, newDate, id);
+  return db.prepare('SELECT * FROM markdown_drafts WHERE id = ?').get(id);
+}
+
+function deleteMarkdownDraft(id) {
+  db.prepare('DELETE FROM markdown_drafts WHERE id = ?').run(id);
+}
