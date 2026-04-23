@@ -1,6 +1,5 @@
-# App name is a placeholder; user will rename before `fly deploy`.
-app = "foxed-CHANGEME"
-primary_region = "iad"
+app = "gloss-nc"
+primary_region = "ord"
 
 [build]
 
