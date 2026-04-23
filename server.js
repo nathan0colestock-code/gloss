@@ -390,12 +390,13 @@ app.get('/api/status', requireBearer, (req, res) => {
 app.get('/login', (req, res) => {
   const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';
   res.type('html').send(`<!doctype html><meta charset=utf-8><title>Gloss · Sign in</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:16px system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#faf8f4}
 form{display:flex;flex-direction:column;gap:.75rem;padding:2rem;border:1px solid #ddd;border-radius:8px;background:#fff;min-width:260px}
 input,button{font:inherit;padding:.5rem .75rem;border:1px solid #ccc;border-radius:4px}
 button{background:#222;color:#fff;border-color:#222;cursor:pointer}</style>
 <form method="POST" action="/api/login"><h2 style="margin:0 0 .5rem">Gloss</h2>${err}
-<input type="password" name="password" autofocus required placeholder="Password"/>
+<input type="password" name="password" autocomplete="current-password" autofocus required placeholder="Password"/>
 <button type="submit">Sign in</button></form>`);
 });
 
@@ -1713,25 +1714,30 @@ function ctxPageToHint(p) {
   };
 }
 
+// Run db.searchItems() with a LIKE fallback when the FTS query is malformed
+// or returns nothing. Mirrors the pattern that was copy-pasted in four places.
+// scanLimit controls the size of the LIKE fallback's base scan (original
+// call sites used 50 or 200). limit is forwarded to db.searchItems when set.
+function safeSearchItems(q, { limit = null, scanLimit = 50 } = {}) {
+  const qLower = q.toLowerCase();
+  const likeScan = () => db.getAllItems(scanLimit).filter(i => i.text.toLowerCase().includes(qLower));
+  let hits;
+  try {
+    hits = limit == null ? db.searchItems(q) : db.searchItems(q, limit);
+  } catch {
+    hits = likeScan();
+  }
+  if (!hits || hits.length === 0) hits = likeScan();
+  return hits;
+}
+
 // ── GET /api/search/items ───────────────────────────────────────────────────
 // Legacy item-only search (kept for back-compat with any older clients). The
 // new global Cmd-K search is at GET /api/search.
 app.get('/api/search/items', (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ results: [] });
-
-  let results;
-  try {
-    results = db.searchItems(q);
-  } catch {
-    // Fall back to LIKE if FTS syntax is bad
-    results = db.getAllItems().filter(i => i.text.toLowerCase().includes(q.toLowerCase()));
-  }
-  if (!results || results.length === 0) {
-    results = db.getAllItems().filter(i => i.text.toLowerCase().includes(q.toLowerCase()));
-  }
-
-  res.json({ results: results.map(formatItem) });
+  res.json({ results: safeSearchItems(q).map(formatItem) });
 });
 
 // ── POST /api/chat ──────────────────────────────────────────────────────────
@@ -1779,16 +1785,7 @@ app.post('/api/chat', async (req, res) => {
   }
 
   if (searchQuery) {
-    let ftsHits = [];
-    try {
-      ftsHits = db.searchItems(searchQuery, 10);
-    } catch {
-      ftsHits = db.getAllItems(50).filter(i => i.text.toLowerCase().includes(qLower));
-    }
-    if (!ftsHits || ftsHits.length === 0) {
-      ftsHits = db.getAllItems(50).filter(i => i.text.toLowerCase().includes(qLower));
-    }
-    contextItems.push(...ftsHits);
+    contextItems.push(...safeSearchItems(searchQuery, { limit: 10, scanLimit: 50 }));
   }
 
   // Fallback: no date scope, no mentions, and no FTS hits → recent items.
@@ -1866,11 +1863,7 @@ function _buildChatContext(query) {
   for (const iso of dateScoped) contextItems.push(...db.getItemsCapturedOn(iso, 20));
   for (const m of resolvedMentions) contextItems.push(...db.getItemsLinkedToEntity(m.kind, m.id, 40));
   if (searchQuery) {
-    let ftsHits = [];
-    try { ftsHits = db.searchItems(searchQuery, 10); }
-    catch { ftsHits = db.getAllItems(50).filter(i => i.text.toLowerCase().includes(qLower)); }
-    if (!ftsHits || ftsHits.length === 0) ftsHits = db.getAllItems(50).filter(i => i.text.toLowerCase().includes(qLower));
-    contextItems.push(...ftsHits);
+    contextItems.push(...safeSearchItems(searchQuery, { limit: 10, scanLimit: 50 }));
   }
   if (contextItems.length === 0) contextItems = db.getAllItems(10);
   const seen = new Set();

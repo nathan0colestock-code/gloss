@@ -201,105 +201,66 @@ db.exec(`
   );
 `);
 
-// Idempotent migration: add question-answer columns if they don't exist
-{
-  const cols = db.pragma('table_info(backlog_items)').map(c => c.name);
-  if (!cols.includes('answer')) db.exec('ALTER TABLE backlog_items ADD COLUMN answer TEXT');
-  if (!cols.includes('answer_format')) db.exec('ALTER TABLE backlog_items ADD COLUMN answer_format TEXT');
-  if (!cols.includes('answer_options')) db.exec('ALTER TABLE backlog_items ADD COLUMN answer_options TEXT');
+// Idempotent column add. Returns true if the column was freshly added, false
+// if it already existed. Collapses the `pragma + ALTER TABLE ADD COLUMN`
+// boilerplate that was repeated dozens of times below.
+function ensureColumn(table, name, ddl) {
+  const cols = db.pragma(`table_info(${table})`).map(c => c.name);
+  if (cols.includes(name)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+  return true;
 }
+
+// Idempotent migration: add question-answer columns if they don't exist
+ensureColumn('backlog_items', 'answer', 'TEXT');
+ensureColumn('backlog_items', 'answer_format', 'TEXT');
+ensureColumn('backlog_items', 'answer_options', 'TEXT');
 // Items: status for bullet-journal arrow semantics (open|done|migrated|scheduled|cancelled|note).
 // Default is NULL — existing rows don't get retrofilled; new parses populate it.
-{
-  const cols = db.pragma('table_info(items)').map(c => c.name);
-  if (!cols.includes('status')) db.exec('ALTER TABLE items ADD COLUMN status TEXT');
+ensureColumn('items', 'status', 'TEXT');
+ensureColumn('commitments', 'target_date', 'TEXT');
+ensureColumn('commitments', 'start_date', 'TEXT');
+ensureColumn('commitments', 'due_date', 'TEXT');
+ensureColumn('projects', 'start_date', 'TEXT');
+ensureColumn('projects', 'due_date', 'TEXT');
+ensureColumn('values_versions', 'category', 'TEXT');
+ensureColumn('values_versions', 'position', 'INTEGER');
+ensureColumn('pages', 'source_kind', 'TEXT');
+if (ensureColumn('pages', 'is_reference', 'INTEGER DEFAULT 0')) {
+  db.exec('CREATE INDEX IF NOT EXISTS ix_pages_is_reference ON pages(is_reference, captured_at DESC)');
 }
-{
-  const cols = db.pragma('table_info(commitments)').map(c => c.name);
-  if (!cols.includes('target_date')) db.exec('ALTER TABLE commitments ADD COLUMN target_date TEXT');
-  if (!cols.includes('start_date')) db.exec('ALTER TABLE commitments ADD COLUMN start_date TEXT');
-  if (!cols.includes('due_date')) db.exec('ALTER TABLE commitments ADD COLUMN due_date TEXT');
-}
-{
-  const cols = db.pragma('table_info(projects)').map(c => c.name);
-  if (!cols.includes('start_date')) db.exec('ALTER TABLE projects ADD COLUMN start_date TEXT');
-  if (!cols.includes('due_date')) db.exec('ALTER TABLE projects ADD COLUMN due_date TEXT');
-}
-{
-  const cols = db.pragma('table_info(values_versions)').map(c => c.name);
-  if (!cols.includes('category')) db.exec('ALTER TABLE values_versions ADD COLUMN category TEXT');
-  if (!cols.includes('position')) db.exec('ALTER TABLE values_versions ADD COLUMN position INTEGER');
-}
-{
-  const cols = db.pragma('table_info(pages)').map(c => c.name);
-  if (!cols.includes('source_kind')) db.exec('ALTER TABLE pages ADD COLUMN source_kind TEXT');
-  if (!cols.includes('is_reference')) {
-    db.exec('ALTER TABLE pages ADD COLUMN is_reference INTEGER DEFAULT 0');
-    db.exec('CREATE INDEX IF NOT EXISTS ix_pages_is_reference ON pages(is_reference, captured_at DESC)');
-  }
-  if (!cols.includes('reference_label')) db.exec('ALTER TABLE pages ADD COLUMN reference_label TEXT');
-  if (!cols.includes('continued_from')) db.exec('ALTER TABLE pages ADD COLUMN continued_from INTEGER');
-  if (!cols.includes('continued_to'))   db.exec('ALTER TABLE pages ADD COLUMN continued_to INTEGER');
-  // Rotation in degrees clockwise — 0 | 90 | 180 | 270. CSS-only rotation; the
-  // underlying scan file on disk is never modified. See rotatePage() / setPageRotation().
-  if (!cols.includes('rotation')) db.exec('ALTER TABLE pages ADD COLUMN rotation INTEGER DEFAULT 0');
-  if (!cols.includes('deleted_at')) db.exec('ALTER TABLE pages ADD COLUMN deleted_at TEXT');
-  db.exec('CREATE INDEX IF NOT EXISTS ix_pages_vol_pagenum ON pages(volume, page_number)');
-}
-{
-  const cols = db.pragma('table_info(links)').map(c => c.name);
-  if (!cols.includes('role_summary')) db.exec('ALTER TABLE links ADD COLUMN role_summary TEXT');
-}
-{
-  const cols = db.pragma('table_info(collections)').map(c => c.name);
-  if (!cols.includes('summary')) db.exec('ALTER TABLE collections ADD COLUMN summary TEXT');
-}
-{
-  const cols = db.pragma('table_info(entities)').map(c => c.name);
-  if (!cols.includes('standard'))      db.exec('ALTER TABLE entities ADD COLUMN standard TEXT');
-  if (!cols.includes('current_focus')) db.exec('ALTER TABLE entities ADD COLUMN current_focus TEXT');
-  if (!cols.includes('priority'))      db.exec('ALTER TABLE entities ADD COLUMN priority INTEGER');
-  if (!cols.includes('parent_id'))     db.exec('ALTER TABLE entities ADD COLUMN parent_id TEXT');
-}
-{
-  const cols = db.pragma('table_info(commitments)').map(c => c.name);
-  if (!cols.includes('parent_id')) db.exec('ALTER TABLE commitments ADD COLUMN parent_id TEXT');
-}
-{
-  const cols = db.pragma('table_info(links)').map(c => c.name);
-  if (!cols.includes('role')) db.exec('ALTER TABLE links ADD COLUMN role TEXT');
-}
-{
-  const cols = db.pragma('table_info(artifacts)').map(c => c.name);
-  if (!cols.includes('fetched_content')) db.exec('ALTER TABLE artifacts ADD COLUMN fetched_content TEXT');
-  if (!cols.includes('fetched_at')) db.exec('ALTER TABLE artifacts ADD COLUMN fetched_at TEXT');
-  if (!cols.includes('fetched_error')) db.exec('ALTER TABLE artifacts ADD COLUMN fetched_error TEXT');
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE artifacts ADD COLUMN archived_at TEXT');
-}
-{
-  const cols = db.pragma('table_info(reference_materials)').map(c => c.name);
-  if (!cols.includes('fetched_content')) db.exec('ALTER TABLE reference_materials ADD COLUMN fetched_content TEXT');
-  if (!cols.includes('fetched_at')) db.exec('ALTER TABLE reference_materials ADD COLUMN fetched_at TEXT');
-  if (!cols.includes('fetched_error')) db.exec('ALTER TABLE reference_materials ADD COLUMN fetched_error TEXT');
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE reference_materials ADD COLUMN archived_at TEXT');
-  // Phase 5 — `row_type` distinguishes plain links from filed scans/clippings.
-  // Default 'link'; the UI's gallery view filters to 'scan'.
-  if (!cols.includes('row_type')) db.exec("ALTER TABLE reference_materials ADD COLUMN row_type TEXT DEFAULT 'link'");
-}
+ensureColumn('pages', 'reference_label', 'TEXT');
+ensureColumn('pages', 'continued_from', 'INTEGER');
+ensureColumn('pages', 'continued_to',   'INTEGER');
+// Rotation in degrees clockwise — 0 | 90 | 180 | 270. CSS-only rotation; the
+// underlying scan file on disk is never modified. See rotatePage() / setPageRotation().
+ensureColumn('pages', 'rotation', 'INTEGER DEFAULT 0');
+ensureColumn('pages', 'deleted_at', 'TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS ix_pages_vol_pagenum ON pages(volume, page_number)');
+ensureColumn('links', 'role_summary', 'TEXT');
+ensureColumn('collections', 'summary', 'TEXT');
+ensureColumn('entities', 'standard',      'TEXT');
+ensureColumn('entities', 'current_focus', 'TEXT');
+ensureColumn('entities', 'priority',      'INTEGER');
+ensureColumn('entities', 'parent_id',     'TEXT');
+ensureColumn('commitments', 'parent_id', 'TEXT');
+ensureColumn('links', 'role', 'TEXT');
+ensureColumn('artifacts', 'fetched_content', 'TEXT');
+ensureColumn('artifacts', 'fetched_at', 'TEXT');
+ensureColumn('artifacts', 'fetched_error', 'TEXT');
+ensureColumn('artifacts', 'archived_at', 'TEXT');
+ensureColumn('reference_materials', 'fetched_content', 'TEXT');
+ensureColumn('reference_materials', 'fetched_at', 'TEXT');
+ensureColumn('reference_materials', 'fetched_error', 'TEXT');
+ensureColumn('reference_materials', 'archived_at', 'TEXT');
+// Phase 5 — `row_type` distinguishes plain links from filed scans/clippings.
+// Default 'link'; the UI's gallery view filters to 'scan'.
+ensureColumn('reference_materials', 'row_type', "TEXT DEFAULT 'link'");
 // archived_at on people/entities/scripture_refs so the unified Index surface can
 // hide-by-default without losing history. Idempotent — matches existing pattern.
-{
-  const cols = db.pragma('table_info(people)').map(c => c.name);
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE people ADD COLUMN archived_at TEXT');
-}
-{
-  const cols = db.pragma('table_info(entities)').map(c => c.name);
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE entities ADD COLUMN archived_at TEXT');
-}
-{
-  const cols = db.pragma('table_info(scripture_refs)').map(c => c.name);
-  if (!cols.includes('archived_at')) db.exec('ALTER TABLE scripture_refs ADD COLUMN archived_at TEXT');
-}
+ensureColumn('people', 'archived_at', 'TEXT');
+ensureColumn('entities', 'archived_at', 'TEXT');
+ensureColumn('scripture_refs', 'archived_at', 'TEXT');
 // Phase 6 — books + user_indexes archive, AI-generated indexes.
 // Books didn't have archived_at. user_indexes needs it plus three columns to
 // support AI-generated indexes: is_ai_generated flag, structure_description
@@ -308,18 +269,12 @@ db.exec(`
 // books is created later in this file (line ~1077); guard so fresh DBs don't error.
 {
   const booksExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='books'").get();
-  if (booksExists) {
-    const cols = db.pragma('table_info(books)').map(c => c.name);
-    if (!cols.includes('archived_at')) db.exec('ALTER TABLE books ADD COLUMN archived_at TEXT');
-  }
+  if (booksExists) ensureColumn('books', 'archived_at', 'TEXT');
 }
-{
-  const cols = db.pragma('table_info(user_indexes)').map(c => c.name);
-  if (!cols.includes('archived_at'))           db.exec('ALTER TABLE user_indexes ADD COLUMN archived_at TEXT');
-  if (!cols.includes('is_ai_generated'))       db.exec('ALTER TABLE user_indexes ADD COLUMN is_ai_generated INTEGER DEFAULT 0');
-  if (!cols.includes('structure_description')) db.exec('ALTER TABLE user_indexes ADD COLUMN structure_description TEXT');
-  if (!cols.includes('last_classified_at'))    db.exec('ALTER TABLE user_indexes ADD COLUMN last_classified_at TEXT');
-}
+ensureColumn('user_indexes', 'archived_at',           'TEXT');
+ensureColumn('user_indexes', 'is_ai_generated',       'INTEGER DEFAULT 0');
+ensureColumn('user_indexes', 'structure_description', 'TEXT');
+ensureColumn('user_indexes', 'last_classified_at',    'TEXT');
 
 // Phase 6 — polymorphic any-to-any, multi-parent tree.
 // A child row can belong to multiple parents of any kind. Enables user-defined
@@ -385,14 +340,11 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS ux_households_name ON households(name COLLATE NOCASE);
 `);
-{
-  const cols = db.pragma('table_info(people)').map(c => c.name);
-  if (!cols.includes('household_id')) {
-    db.exec('ALTER TABLE people ADD COLUMN household_id TEXT');
-    db.exec('CREATE INDEX IF NOT EXISTS ix_people_household ON people(household_id)');
-  }
-  if (!cols.includes('first_names')) db.exec('ALTER TABLE people ADD COLUMN first_names TEXT');
+if (ensureColumn('people', 'household_id', 'TEXT')) {
+  db.exec('CREATE INDEX IF NOT EXISTS ix_people_household ON people(household_id)');
 }
+ensureColumn('people', 'first_names', 'TEXT');
+ensureColumn('artifacts', 'notes', 'TEXT');
 
 // Idempotent cleanup: strip literal ASCII/smart quote chars from stored aliases.
 // Background: extractPersonNameFromSubject used to normalize only smart quotes,
@@ -429,11 +381,6 @@ db.exec(`
     }
   }
   if (cleaned) console.log(`[migrate] cleaned quote-corrupted first_names on ${cleaned} people rows`);
-}
-
-{
-  const cols = db.pragma('table_info(artifacts)').map(c => c.name);
-  if (!cols.includes('notes')) db.exec('ALTER TABLE artifacts ADD COLUMN notes TEXT');
 }
 
 // Explicit UNIQUE indexes + perf indexes. `CREATE TABLE IF NOT EXISTS` no-ops
@@ -508,28 +455,18 @@ db.exec(`
 // content_hash + links_classified_at let the cross-kind auto-link classifier
 // skip rows whose semantic body (title + description) hasn't changed since the
 // last sweep. NULL links_classified_at means "never classified."
-{
-  const cols = db.pragma('table_info(collections)').map(c => c.name);
-  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE collections ADD COLUMN content_hash TEXT');
-  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE collections ADD COLUMN links_classified_at TEXT');
-}
-{
-  const cols = db.pragma('table_info(artifacts)').map(c => c.name);
-  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE artifacts ADD COLUMN content_hash TEXT');
-  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE artifacts ADD COLUMN links_classified_at TEXT');
-}
-{
-  const cols = db.pragma('table_info(reference_materials)').map(c => c.name);
-  if (!cols.includes('content_hash'))         db.exec('ALTER TABLE reference_materials ADD COLUMN content_hash TEXT');
-  if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE reference_materials ADD COLUMN links_classified_at TEXT');
-}
+ensureColumn('collections',         'content_hash',        'TEXT');
+ensureColumn('collections',         'links_classified_at', 'TEXT');
+ensureColumn('artifacts',           'content_hash',        'TEXT');
+ensureColumn('artifacts',           'links_classified_at', 'TEXT');
+ensureColumn('reference_materials', 'content_hash',        'TEXT');
+ensureColumn('reference_materials', 'links_classified_at', 'TEXT');
 // daily_logs is created later in this file; guard so fresh DBs don't error.
 {
   const dlExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_logs'").get();
   if (dlExists) {
-    const cols = db.pragma('table_info(daily_logs)').map(c => c.name);
-    if (!cols.includes('content_hash'))         db.exec('ALTER TABLE daily_logs ADD COLUMN content_hash TEXT');
-    if (!cols.includes('links_classified_at'))  db.exec('ALTER TABLE daily_logs ADD COLUMN links_classified_at TEXT');
+    ensureColumn('daily_logs', 'content_hash',        'TEXT');
+    ensureColumn('daily_logs', 'links_classified_at', 'TEXT');
   }
 }
 
