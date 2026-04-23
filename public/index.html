@@ -2811,25 +2811,30 @@ function openBlankDay(date) {
 }
 
 async function openDayDetail(id, { skipRedirect = false } = {}) {
-  detailInner.innerHTML = '';
-  // Skeleton: header + a few tiles so the user sees structure immediately.
-  const sk = h('div', null,
-    h('div', { class: 'detail-head' },
-      h('div', null,
-        h('div', { class: 'sk sk-text', style: { width: '180px', height: '18px' } }),
-        h('div', { class: 'sk sk-text', style: { width: '100px', height: '10px', marginTop: '6px' } }),
+  const alreadyOpen = document.body.classList.contains('has-detail');
+  if (!alreadyOpen) {
+    detailInner.innerHTML = '';
+    // Skeleton: header + a few tiles so the user sees structure immediately.
+    const sk = h('div', null,
+      h('div', { class: 'detail-head' },
+        h('div', null,
+          h('div', { class: 'sk sk-text', style: { width: '180px', height: '18px' } }),
+          h('div', { class: 'sk sk-text', style: { width: '100px', height: '10px', marginTop: '6px' } }),
+        ),
       ),
-    ),
-    h('div', { style: { padding: '18px 4px' } }, skDayTiles(3)),
-  );
-  detailInner.appendChild(sk);
+      h('div', { style: { padding: '18px 4px' } }, skDayTiles(3)),
+    );
+    detailInner.appendChild(sk);
+  }
   openDetail();
 
   let raw;
   try { raw = await api(`/api/daily-logs/${id}`); }
   catch (err) {
-    detailInner.innerHTML = '';
-    detailInner.appendChild(emptyState({ title: "Couldn't load this day.", sub: err.message }));
+    swapDetailPane(() => {
+      detailInner.innerHTML = '';
+      detailInner.appendChild(emptyState({ title: "Couldn't load this day.", sub: err.message }));
+    });
     return;
   }
   const dl = raw.daily_log || raw;
@@ -2858,15 +2863,13 @@ async function openDayDetail(id, { skipRedirect = false } = {}) {
     return;
   }
 
-  detailInner.innerHTML = '';
-  detailInner.append(
-    h('div', { class: 'detail-head' },
-      h('div', null,
-        h('div', { class: 'title' }, dateLabel(date)),
-        h('div', { class: 'sub' }, date),
-      ),
-      h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
+  // Build new content off-tree so the skeleton→real swap is atomic.
+  const newHead = h('div', { class: 'detail-head' },
+    h('div', null,
+      h('div', { class: 'title' }, dateLabel(date)),
+      h('div', { class: 'sub' }, date),
     ),
+    h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
   );
 
   const body = h('div', { style: { padding: '20px 4px' } });
@@ -2880,20 +2883,24 @@ async function openDayDetail(id, { skipRedirect = false } = {}) {
   }));
 
   body.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '24px', marginBottom: '10px' } }, `Pages (${pages.length})`));
-  const tilesHost = h('div', { class: 'stagger-in' });
+  const tilesHost = h('div');
   body.appendChild(tilesHost);
   if (!pages.length) {
     tilesHost.appendChild(emptyState({ title: 'No pages on this day.' }));
   } else {
+    let _tileIdx = 0;
     for (const [scanPath, group] of groups) {
       const first = group[0];
       const isVoice = first.source_kind === 'voice_memo' || (first.scan_path || '').startsWith('voice:');
       const isMarkdown = first.source_kind === 'markdown' || (first.scan_path || '').startsWith('markdown:');
+      // First few tiles eager-load their thumbnails so they're painted by the
+      // time the skeleton swap completes — no image pop-in on common-case lists.
+      const imgLoading = _tileIdx++ < 4 ? 'eager' : 'lazy';
       const thumb = isVoice
         ? h('div', { class: 'thumb voice' }, '♪')
         : isMarkdown
           ? h('div', { class: 'thumb md' }, '{ }')
-          : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy', decoding: 'async' }));
+          : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: imgLoading, decoding: 'async', fetchpriority: imgLoading === 'eager' ? 'high' : 'auto' }));
       const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
       const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
       const tag = isVoice ? ' · voice' : (isMarkdown ? ' · markdown' : '');
@@ -2954,7 +2961,13 @@ async function openDayDetail(id, { skipRedirect = false } = {}) {
   }
   if (hasLinks) body.appendChild(sectionHost);
 
-  detailInner.appendChild(body);
+  // Atomic swap: skeleton out, real content in, as a single View Transition.
+  // Keeps the pane from double-animating (fade skeleton out while new content
+  // staggers in). Falls back to an instant replace on Firefox etc.
+  swapDetailPane(() => {
+    detailInner.innerHTML = '';
+    detailInner.append(newHead, body);
+  });
 }
 
 function makeChip(it, kind, textKey = 'label') {
@@ -2968,17 +2981,36 @@ function makeChip(it, kind, textKey = 'label') {
   return chip;
 }
 
+// Swap the detail pane content from skeleton to real content with a native
+// cross-fade via the View Transitions API. The skeleton is already visible;
+// the browser captures it, runs fn() to swap in real content, then fades
+// between the two snapshots. Without VT, the swap is instant (feels fast
+// but abrupt on Firefox). Prefer this over manually stacking cascade +
+// stagger-in animations on skeleton-to-real swaps — those overlap and feel
+// jerky. VT cross-fade is one smooth motion.
+function swapDetailPane(fn) {
+  if (document.startViewTransition) {
+    try { document.startViewTransition(fn); return; } catch {}
+  }
+  fn();
+}
+
 // ─── PAGE detail ──────────────────────────
 async function openPageDetail(id) {
-  detailInner.innerHTML = '';
-  detailInner.appendChild(skPageDetail());
+  const alreadyOpen = document.body.classList.contains('has-detail');
+  if (!alreadyOpen) {
+    detailInner.innerHTML = '';
+    detailInner.appendChild(skPageDetail());
+  }
   openDetail();
   try {
     const raw = await api(`/api/pages/${id}/detail`);
-    renderPageDetail(unpackPageDetail(raw));
+    swapDetailPane(() => renderPageDetail(unpackPageDetail(raw)));
   } catch (err) {
-    detailInner.innerHTML = '';
-    detailInner.appendChild(emptyState({ title: "Couldn't load this page.", sub: err.message }));
+    swapDetailPane(() => {
+      detailInner.innerHTML = '';
+      detailInner.appendChild(emptyState({ title: "Couldn't load this page.", sub: err.message }));
+    });
   }
 }
 
@@ -4397,7 +4429,6 @@ async function openEntityDetail(kind, node, { skipRedirect = false } = {}) {
 }
 
 function renderEntityDetail(kind, node, conn) {
-  detailInner.innerHTML = '';
   const label = node.label || node.title || node.canonical || '(untitled)';
   const kindLabel = KIND_ORDER.find(([k]) => k === kind)?.[1] || kind;
 
@@ -4409,18 +4440,16 @@ function renderEntityDetail(kind, node, conn) {
     ...rowActionsFor(kind, node),
   );
 
-  detailInner.append(
-    h('div', { class: 'detail-head' },
-      h('div', null,
-        h('div', { class: 'sub' }, kindLabel),
-        h('div', { class: 'title' }, label),
-      ),
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-        convertBtn,
-        h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
-      ),
+  // Build off-tree; atomic swap at end via swapDetailPane (below).
+  const newHead = h('div', { class: 'detail-head' },
+    h('div', null,
+      h('div', { class: 'sub' }, kindLabel),
+      h('div', { class: 'title' }, label),
     ),
-    detailActionsRow,
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+      convertBtn,
+      h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
+    ),
   );
 
   const body = h('div', { style: { padding: '20px 4px' } });
@@ -4518,15 +4547,17 @@ function renderEntityDetail(kind, node, conn) {
       groups.get(key).push(p);
     }
 
+    let _tileIdx = 0;
     for (const [, group] of groups) {
       const first = group[0];
       const isVoice = first.source_kind === 'voice_memo' || (first.scan_path || '').startsWith('voice:');
       const isMarkdown = first.source_kind === 'markdown' || (first.scan_path || '').startsWith('markdown:');
+      const imgLoading = _tileIdx++ < 4 ? 'eager' : 'lazy';
       const thumb = isVoice
         ? h('div', { class: 'thumb voice' }, '♪')
         : isMarkdown
           ? h('div', { class: 'thumb md' }, '{ }')
-          : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: 'lazy', decoding: 'async' }));
+          : h('div', { class: 'thumb' }, h('img', { src: `/api/pages/${first.id}/scan`, alt: '', loading: imgLoading, decoding: 'async', fetchpriority: imgLoading === 'eager' ? 'high' : 'auto' }));
       const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
       const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
 
@@ -4601,7 +4632,11 @@ function renderEntityDetail(kind, node, conn) {
   }
   if (hasConns) body.appendChild(connHost);
 
-  detailInner.appendChild(body);
+  // Atomic swap so the skeleton crossfades to real content in one motion.
+  swapDetailPane(() => {
+    detailInner.innerHTML = '';
+    detailInner.append(newHead, detailActionsRow, body);
+  });
 }
 
 function invalidateIndexCache() { cachedIndexTree = null; }
