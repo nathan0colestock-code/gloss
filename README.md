@@ -31,6 +31,18 @@ Capture → **✎ Briefing** opens `/research.html`. Type (or dictate) a topic; 
 ### View in Comms
 People with priority ≥ 1 on their detail page show a "View in Comms" link that deep-links into the matching contact profile in the comms app. Powered by the public `/api/suite-config` endpoint.
 
+### Voice memo recording
+🎙️ button on the Capture page records audio in the browser (`MediaRecorder`), uploads via `POST /api/ingest/voice-audio`, Gemini transcribes it, and the transcript runs through the existing voice-memo parse pipeline. Works on iOS Safari (audio/mp4) and Chrome/Android (audio/opus). Captures stream entity deltas live — people, scripture, topics — as Gemini confirms them.
+
+### Promote to Scribe
+Any note's detail view has a **→ New Scribe version** button. It creates a new Scribe document seeded with the page's summary + raw text and tagged as a version of the originating gloss page. Subsequent promotions show up as `v1 · v2 · …` chips that deep-link back to each Scribe doc.
+
+### Live entity extraction on voice + markdown captures
+Voice memos and typed markdown captures stream entity extraction in real time — chips appear inline as Gemini confirms them, rather than waiting for the whole parse. Image scans keep the current async flow (too expensive to block on).
+
+### Mobile formatting toolbar
+Markdown textarea on mobile gets a sticky bottom toolbar: **B / I / H1 / H2 / • / ☐ / 🔗**. iOS auto-zoom fixed (inputs now ≥ 16px on mobile).
+
 ---
 
 ## Stack
