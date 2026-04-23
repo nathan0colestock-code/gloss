@@ -24,6 +24,54 @@ after(() => {
   }
 });
 
+describe('comms.pushContactsToComms', () => {
+  test('POSTs { contacts: [...] } to <url>/api/gloss/contacts with Bearer auth', async () => {
+    const http = require('http');
+    const received = { url: null, body: null, auth: null };
+    const server = http.createServer((req, res) => {
+      received.url = req.url;
+      received.auth = req.headers.authorization;
+      let buf = '';
+      req.on('data', c => buf += c);
+      req.on('end', () => {
+        try { received.body = JSON.parse(buf); } catch { received.body = buf; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, saved: 1 }));
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address();
+    const prevUrl = process.env.COMMS_URL;
+    const prevKey = process.env.COMMS_API_KEY;
+    process.env.COMMS_URL = `http://127.0.0.1:${port}`;
+    process.env.COMMS_API_KEY = 'push-test-key';
+    try {
+      const payload = [{
+        contact: 'Someone',
+        aliases: [],
+        gloss_id: 'id-1',
+        gloss_url: 'http://localhost:3747/#/index/person/id-1',
+        mention_count: 1,
+        last_mentioned_at: '2026-04-01',
+        priority: 1,
+        growth_note: null,
+        recent_context: [{ date: '2026-04-01', role_summary: 'test', collection: null }],
+        linked_collections: [],
+      }];
+      const result = await comms.pushContactsToComms(payload);
+      assert.equal(result.ok, true);
+      assert.equal(received.url, '/api/gloss/contacts');
+      assert.equal(received.auth, 'Bearer push-test-key');
+      assert.ok(Array.isArray(received.body.contacts));
+      assert.equal(received.body.contacts[0].contact, 'Someone');
+    } finally {
+      process.env.COMMS_URL = prevUrl || '';
+      process.env.COMMS_API_KEY = prevKey || '';
+      await new Promise(r => server.close(r));
+    }
+  });
+});
+
 describe('comms.buildContactsPayload', () => {
   test('skips people with priority < 1', () => {
     const noPrio = db.upsertPerson({ label: 'No Priority ' + crypto.randomUUID().slice(0, 6) });
