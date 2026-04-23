@@ -137,6 +137,23 @@ Drop a scan (JPEG/PNG or PDF) or paste a voice-memo transcript through the UI. T
 
 ---
 
+## Suite siblings
+
+Gloss is the **personal knowledge graph** node of a five-app personal suite. The apps are independent processes that talk over HTTP with Bearer auth; each runs on [Fly.io](https://fly.io) and backs up SQLite to Cloudflare R2 via [Litestream](https://litestream.io). Gloss additionally runs a daily rclone sync of its scan images to R2.
+
+| App | Role | How it integrates with Gloss |
+|---|---|---|
+| **[comms](https://github.com/nathan0colestock-code/comms)** | iMessage + Gmail + contacts hub | Gloss pushes contact profiles to Comms via `POST /api/gloss/contacts` when people are added/edited in gloss |
+| **[scribe](https://github.com/nathan0colestock-code/scribe)** | Collaborative document editor | Scribe links documents to gloss collections via `GET/POST /api/gloss-links/*` |
+| **[black](https://github.com/nathan0colestock-code/black)** | Personal file search (Drive, Evernote, iCloud → indexed) | Black search results can deep-link to matching gloss pages |
+| **[maestro](https://github.com/nathan0colestock-code/maestro)** | Overnight orchestration (capture → worker → test → merge → deploy) | Maestro polls `GET /api/status` and can dispatch feature sets that touch Gloss |
+
+All five apps expose a suite-standard `GET /api/status` returning `{ app, version, ok, uptime_seconds, metrics }`, protected by Bearer auth using either the app's own `API_KEY` or a shared `SUITE_API_KEY`.
+
+Integration contracts between pairs of apps live in `docs/INTEGRATIONS/` in the primary repo for each contract.
+
+---
+
 ## License
 
 Private.
