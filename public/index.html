@@ -3983,25 +3983,149 @@ function attachMarkdownToolbar(ta) {
   return toolbar;
 }
 
-// Voice-memo recorder. Renders a [🎙 Record] button; on tap, requests mic
-// access, streams to MediaRecorder, and on stop uploads the blob to
-// /api/ingest/voice-audio. The server handles transcription via Gemini and
-// runs the transcript through the existing parseVoiceMemo pipeline — same
-// entity extraction / backlog / index classification as the typed-transcript
-// path. Graceful fallback: if MediaRecorder is unsupported (old browsers),
-// the button is hidden and a console log notes why.
+// Voice-memo recorder. Supports two capture paths:
+//   1. Web Speech API (quick capture) — transcribes client-side and POSTs to
+//      /api/ingest/voice (text transcript path, same endpoint the Maestro app
+//      uses). Primary on iOS where MediaRecorder support is inconsistent.
+//   2. Audio upload (high quality) — MediaRecorder → /api/ingest/voice-audio
+//      with Gemini server-side transcription. Falls back to this path when
+//      Web Speech API is unavailable.
+// The active tab is remembered in-session. Graceful degradation: if neither
+// API is available, the section hides.
 function renderVoiceRecorder(streamHost) {
   const wrap = h('div', { style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px dashed var(--rule)' } });
-  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    console.log('[voice] MediaRecorder unavailable — recording UI hidden');
+  const hasMediaRecorder = !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (!hasMediaRecorder && !hasSpeech) {
+    console.log('[voice] neither MediaRecorder nor SpeechRecognition available — recording UI hidden');
     wrap.style.display = 'none';
     return wrap;
   }
-  const label = h('div', { class: 'lbl-mono', style: { marginBottom: '6px' } }, 'Voice memo');
+
+  // Tab toggle — prefer Web Speech (Maestro-unified path) when available.
+  let activeTab = hasSpeech ? 'speech' : 'audio';
+  const labelRow = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' } });
+  const labelText = h('div', { class: 'lbl-mono' }, 'Voice memo');
+  labelRow.appendChild(labelText);
+  if (hasSpeech && hasMediaRecorder) {
+    const tabWrap = h('div', { style: { display: 'flex', gap: '4px', marginLeft: 'auto' } });
+    const speechTab = h('button', { class: 'chip accent', style: { fontSize: '11px', cursor: 'pointer' } }, 'Quick');
+    const audioTab  = h('button', { class: 'chip ghost', style: { fontSize: '11px', cursor: 'pointer' } }, 'Audio');
+    speechTab.addEventListener('click', () => { activeTab = 'speech'; speechPanel.style.display = ''; audioPanel.style.display = 'none'; speechTab.className = 'chip accent'; audioTab.className = 'chip ghost'; });
+    audioTab.addEventListener('click',  () => { activeTab = 'audio';  speechPanel.style.display = 'none'; audioPanel.style.display = ''; speechTab.className = 'chip ghost'; audioTab.className = 'chip accent'; });
+    tabWrap.append(speechTab, audioTab);
+    labelRow.appendChild(tabWrap);
+  }
+  wrap.appendChild(labelRow);
+
+  // ── Web Speech panel ──────────────────────────────────────────────────────
+  // Captures using SpeechRecognition API (same tech as Maestro PWA), then
+  // POSTs the text transcript to /api/ingest/voice for entity extraction.
+  const speechPanel = h('div', { style: { display: activeTab === 'speech' ? '' : 'none' } });
+  if (hasSpeech) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let finalText = '';
+    let listening = false;
+    const micBtn  = h('button', { class: 'btn', style: { minWidth: '120px' } }, '🎙 Start');
+    const sendBtn = h('button', { class: 'btn ghost', style: { display: 'none', minWidth: '80px' } }, 'Save');
+    const clearBtn = h('button', { class: 'btn ghost', style: { display: 'none', fontSize: '12px' } }, 'Clear');
+    const speechStatus = h('div', { class: 'mono soft', style: { fontSize: '12px', marginTop: '6px' } }, '');
+    const previewBox = h('div', { class: 'voice-frame soft', style: { display: 'none', marginTop: '8px', maxHeight: '80px', overflowY: 'auto' } }, '');
+    const btnRow = h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, micBtn, sendBtn, clearBtn);
+    speechPanel.append(btnRow, speechStatus, previewBox);
+
+    const updatePreview = (text) => {
+      if (text.trim()) {
+        previewBox.textContent = text;
+        previewBox.style.display = '';
+        sendBtn.style.display = '';
+        clearBtn.style.display = '';
+      } else {
+        previewBox.style.display = 'none';
+        sendBtn.style.display = 'none';
+        clearBtn.style.display = 'none';
+      }
+    };
+
+    micBtn.addEventListener('click', () => {
+      if (listening) {
+        recognition && recognition.stop();
+        return;
+      }
+      finalText = '';
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognition.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalText += (finalText ? ' ' : '') + t;
+          else interim = t;
+        }
+        previewBox.textContent = (finalText + (interim ? ' ' + interim : '')).trim();
+        previewBox.style.display = '';
+        sendBtn.style.display = '';
+        clearBtn.style.display = '';
+      };
+      recognition.onerror = () => { listening = false; micBtn.textContent = '🎙 Start'; micBtn.classList.remove('primary'); speechStatus.textContent = 'Mic error'; };
+      recognition.onend = () => { listening = false; micBtn.textContent = '🎙 Start'; micBtn.classList.remove('primary'); updatePreview(finalText); };
+      recognition.start();
+      listening = true;
+      micBtn.textContent = '⏹ Stop';
+      micBtn.classList.add('primary');
+      speechStatus.textContent = '● Listening…';
+    });
+
+    clearBtn.addEventListener('click', () => { finalText = ''; updatePreview(''); speechStatus.textContent = ''; });
+
+    sendBtn.addEventListener('click', async () => {
+      const text = (previewBox.textContent || finalText || '').trim();
+      if (!text) return;
+      sendBtn.disabled = true;
+      micBtn.disabled = true;
+      speechStatus.textContent = 'Saving…';
+      try {
+        const result = await api('/api/ingest/voice', 'POST', { transcript: text, date: todayIso() });
+        speechStatus.textContent = `Saved · ${result.items_count || 0} items`;
+        previewBox.textContent = '';
+        previewBox.style.display = 'none';
+        sendBtn.style.display = 'none';
+        clearBtn.style.display = 'none';
+        finalText = '';
+        const tile = h('div', { class: 'ingest-tile' },
+          h('div', { class: 'meta' },
+            h('div', { class: 'vp' }, '🎙 voice memo'),
+            h('div', { class: 'sum' }, result.summary || '(no summary)'),
+          ),
+        );
+        if (result.page_id) tile.addEventListener('click', () => navigate('page', result.page_id));
+        if (streamHost) {
+          const prev = streamHost.querySelector('.ingest-stream');
+          if (!prev) { streamHost.appendChild(h('div', { class: 'ingest-stream' }, tile)); }
+          else { prev.appendChild(tile); }
+        }
+        toast('Voice memo saved', 'ok');
+      } catch (err) {
+        speechStatus.textContent = `Error: ${err.message}`;
+        toast(err.message, 'err');
+      } finally {
+        sendBtn.disabled = false;
+        micBtn.disabled = false;
+      }
+    });
+  }
+  wrap.appendChild(speechPanel);
+
+  // ── Audio upload panel ────────────────────────────────────────────────────
+  const audioPanel = h('div', { style: { display: activeTab === 'audio' ? '' : 'none' } });
+  if (hasMediaRecorder) {
   const recBtn = h('button', { class: 'btn', style: { minWidth: '140px' } }, '🎙 Record');
   const status = h('span', { class: 'mono soft', style: { marginLeft: '10px', fontSize: '12px' } }, '');
   const row = h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } }, recBtn, status);
-  wrap.append(label, row);
+  audioPanel.appendChild(row);
 
   let recorder = null;
   let chunks = [];
@@ -4149,6 +4273,8 @@ function renderVoiceRecorder(streamHost) {
     updateTimer();
     timerId = setInterval(updateTimer, 500);
   });
+  } // end if (hasMediaRecorder)
+  wrap.appendChild(audioPanel);
 
   return wrap;
 }
