@@ -1,10 +1,11 @@
 # ai.js — Gemini contracts
 
-Single file (~830 lines) wrapping every Gemini call. Exports eight functions; everything else is prompt text and a JSON salvager.
+Single file (~1100 lines) wrapping every Gemini call. Exports twelve functions; everything else is prompt text and a JSON salvager.
 
 ```js
 module.exports = {
-  parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, probePageHeader,
+  parsePageImage, chat, chatWithActions, reexaminePage,
+  parseVoiceMemo, parseMarkdownPage, probePageHeader,
   // Phase 6 — unified index / AI-described indexes:
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
   // Phase 7 — cross-kind auto-linking + topical (back-of-book) index rebuild:
