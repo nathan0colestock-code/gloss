@@ -1,0 +1,46 @@
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Node
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Local data — SQLite DB, scans, artifacts, references all live on the Fly volume.
+data
+
+# Secrets / local env
+.env
+.env.*
+
+# Local-only scripts and tests — one-shot seeds and Node test files don't ship.
+scripts
+tests
+
+# Docs (not executable)
+README.md
+CLAUDE.md
+*.CLAUDE.md
+public/CLAUDE.md
+RESUME_NOTEBOOK_INGEST.md
+
+# Editor / OS junk
+.DS_Store
+.vscode
+.idea
+
+# Coverage / packaged artifacts
+coverage
+*.tgz
+
+# Claude tooling (not present in repo, harmless if added later)
+.claude
+
+# Docker files themselves don't need to be in the image
+Dockerfile
+.dockerignore
+fly.toml
