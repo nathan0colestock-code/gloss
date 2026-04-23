@@ -243,7 +243,30 @@ if (IS_PROD) {
   }
 }
 const COOKIE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
-const AUTH_BYPASS = new Set(['/login', '/api/login', '/api/logout', '/api/health', '/favicon.ico']);
+const AUTH_BYPASS = new Set(['/login', '/api/login', '/api/logout', '/api/health', '/api/status', '/favicon.ico']);
+
+// ── Bearer auth (suite-wide) ────────────────────────────────────────────────
+// Accepts either the app's own API_KEY or the shared SUITE_API_KEY env var.
+// Used for /api/status (and any future suite-level probes). Inbound cookie
+// session remains the primary path for interactive UI use.
+function checkBearerAuth(req) {
+  const header = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/.exec(header);
+  const token = m ? m[1].trim() : (req.headers['x-api-key'] || '').trim();
+  if (!token) return false;
+  const candidates = [process.env.API_KEY, process.env.SUITE_API_KEY].filter(Boolean);
+  if (candidates.length === 0) return false;
+  const tBuf = Buffer.from(token);
+  for (const c of candidates) {
+    const cBuf = Buffer.from(c);
+    if (tBuf.length === cBuf.length && crypto.timingSafeEqual(tBuf, cBuf)) return true;
+  }
+  return false;
+}
+function requireBearer(req, res, next) {
+  if (checkBearerAuth(req)) return next();
+  return res.status(401).json({ error: 'auth required' });
+}
 
 function signCookie(payload) {
   const p = Buffer.from(String(payload), 'utf8').toString('base64url');
@@ -311,6 +334,45 @@ function recordLoginAttempt(req) {
 }
 
 app.get('/api/health', (req, res) => res.json({ ok: true, now: Date.now() }));
+
+// ── /api/status ────────────────────────────────────────────────────────────
+// Suite-wide status endpoint. Returns app name, version, uptime, and a small
+// set of metrics. Each metric is wrapped in try/catch so a bad query can't
+// take the endpoint down — probes should never flap because of a migration.
+const APP_VERSION = (() => {
+  try { return require('./package.json').version || '0.0.0'; }
+  catch { return '0.0.0'; }
+})();
+app.get('/api/status', requireBearer, (req, res) => {
+  const metrics = {
+    total_pages: 0,
+    total_people: 0,
+    total_collections: 0,
+    pending_backlog: 0,
+  };
+  const handle = (db.handle && typeof db.handle === 'function') ? db.handle() : null;
+  const runCount = (sql) => {
+    try {
+      if (!handle) return 0;
+      const row = handle.prepare(sql).get();
+      if (!row) return 0;
+      const v = Object.values(row)[0];
+      return typeof v === 'number' ? v : Number(v) || 0;
+    } catch { return 0; }
+  };
+  metrics.total_pages        = runCount('SELECT COUNT(*) AS n FROM pages');
+  metrics.total_people       = runCount('SELECT COUNT(*) AS n FROM people');
+  metrics.total_collections  = runCount('SELECT COUNT(*) AS n FROM collections');
+  metrics.pending_backlog    = runCount("SELECT COUNT(*) AS n FROM backlog_items WHERE status='pending'");
+
+  res.json({
+    app: 'gloss',
+    version: APP_VERSION,
+    ok: true,
+    uptime_seconds: Math.floor(process.uptime()),
+    metrics,
+  });
+});
 
 app.get('/login', (req, res) => {
   const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';

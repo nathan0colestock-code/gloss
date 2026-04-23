@@ -104,6 +104,67 @@ describe('GET /api/pages/:id/detail', () => {
   });
 });
 
+// ── Status endpoint ────────────────────────────────────────────────────────
+
+describe('GET /api/status', () => {
+  test('rejects without auth', async () => {
+    const { status } = await get('/api/status');
+    assert.equal(status, 401);
+  });
+
+  test('accepts Bearer with API_KEY', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = 'test-api-key-status';
+    try {
+      const res = await fetch(baseUrl + '/api/status', {
+        headers: { 'Authorization': 'Bearer test-api-key-status' },
+      });
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.app, 'gloss');
+      assert.equal(body.ok, true);
+      assert.ok(typeof body.version === 'string');
+      assert.ok(typeof body.uptime_seconds === 'number');
+      assert.ok(body.metrics);
+      for (const k of ['total_pages', 'total_people', 'total_collections', 'pending_backlog']) {
+        assert.ok(k in body.metrics, `metrics.${k} missing`);
+        assert.equal(typeof body.metrics[k], 'number');
+      }
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+
+  test('accepts Bearer with SUITE_API_KEY', async () => {
+    const prev = process.env.SUITE_API_KEY;
+    process.env.SUITE_API_KEY = 'test-suite-key-status';
+    try {
+      const res = await fetch(baseUrl + '/api/status', {
+        headers: { 'Authorization': 'Bearer test-suite-key-status' },
+      });
+      assert.equal(res.status, 200);
+    } finally {
+      if (prev === undefined) delete process.env.SUITE_API_KEY;
+      else process.env.SUITE_API_KEY = prev;
+    }
+  });
+
+  test('rejects wrong Bearer token', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = 'real-key';
+    try {
+      const res = await fetch(baseUrl + '/api/status', {
+        headers: { 'Authorization': 'Bearer wrong-key' },
+      });
+      assert.equal(res.status, 401);
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+});
+
 describe('PATCH /api/pages/:id', () => {
   test('updates page summary', async () => {
     const id = seedPage();
