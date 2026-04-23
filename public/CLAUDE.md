@@ -1,25 +1,22 @@
-# CLAUDE.md — Foxed frontend (`public/`)
+# CLAUDE.md — Gloss frontend (`public/`)
 
-The entire UI lives in one file: [index.html](index.html), currently ~9700 lines. Vanilla JS, no framework, no build step, no bundler, no TypeScript. This is deliberate — see root [CLAUDE.md](../CLAUDE.md) stop-ship #10.
+The entire UI lives in one file: [index.html](index.html), currently ~4200 lines. Vanilla JS, no framework, no build step, no bundler, no TypeScript. This is deliberate — see root [CLAUDE.md](../CLAUDE.md) stop-ship #10.
 
-## Shell (Phase 6 — palette-primary, sidebar-free)
+## Current shell (sidebar + detail)
 
-The legacy `<aside id="sidebar">` and `#chat-dock` DOM still exist, but `<body class="compact-shell">` hides them. The live shell is:
+The live shell is minimal:
 
-- **`#launcher`** (top-right) — five buttons: Home, Capture, Planning, Index (opens tree drawer), ⌘K (opens cmdk palette). That's the entire always-visible chrome.
-- **`#tree-drawer`** — slide-in left drawer with the unified Index tree, kind-grouped (Collections / Books / Artifacts / References / People / Topics / Scripture / My Indexes). Opened via Cmd-\\ or the Index launcher button. Fed by `GET /api/index/tree`. Each row: `[▸ label] direct/total` + an inline action strip `[↑ parent · Rename · Merge · 📥 Archive · × Delete]` (plus a "Reclassify" button on AI-generated user_indexes). Clicking the **label** opens an *entity tab* (metadata editor); clicking the **count** opens a *pages tab*.
-- **`#tabbar`** + tab content — the right pane is a browser-like tab strip. Tabs persist in `localStorage['foxed.tabs.v1']`. Current tab kinds:
-  - `home` → `#home-tab` surface, payload from `/api/home`.
-  - `pages` (ctx ∈ page|collection|day|book|index) → routed through `showPagesView`; content lives in the original per-kind detail DIVs but they're reached via the tab system, not the sidebar.
-  - `entity` (ctx ∈ edit-collection|edit-book|edit-user_index|edit-artifact|edit-reference|edit-person|edit-topic|edit-scripture) → `#entity-tab` metadata editor, per-kind form.
-  - `capture` / `planning` → activates the existing `#ingest` / `#planning` surface inside the tab.
-- **Global hotkeys**: `Cmd-\` toggles tree drawer, `Cmd-K` opens cmdk palette (wired to `/api/index/search`), `Cmd-W` closes active tab, `Esc` closes whichever overlay is open.
-
-Legacy `openCollection` / `openBook` / `openDailyLog` / `openCustomIndex` / `openPage` are *wrapped* by `wrapOpenFunctions` — the wrapper calls `openPagesTab({...})` instead of the raw function unless an internal `_fromTab` sentinel is set. Don't remove the wrapper; it's how the old nav still works while routing everything through tabs.
-
-**If you add a new surface, make it a tab ctx, not a new sidebar entry.** The sidebar is dead.
+- **`#rail`** (left sidebar) — three nav buttons (Capture / Log / Index) + theme toggle. Collapsible via `#rail-toggle` → sets `body.rail-collapsed`. Rail-footer holds the "notebook · v1" caption and the `#comms-pill` (only visible when Comms push is configured via COMMS_URL + COMMS_API_KEY — polls `/api/comms/status` every minute).
+- **`#main` + `#main-inner`** — the working surface. `routes = { capture: renderCapture, log: renderLog, index: renderIndex }` dispatches based on `location.hash`. Each renderer rebuilds `#main-inner` from scratch.
+- **`#detail`** — right-pane slide-in for per-page / per-day / per-entity detail, toggled via `openDetail()` / `closeDetail()`. Mobile: occupies the full viewport.
+- **`#cmdk`** — Cmd-K palette for cross-index search. Fed by `/api/index/search`.
+- **`#bottom-tabs`** — hidden by default; activated in mobile media-query (max-width: 780px) in place of `#rail`.
 
 Read this file before editing `index.html`. The root CLAUDE.md covers data model and backend; this file covers the UI's design system, primitives, and the conventions that keep the single-file pattern manageable.
+
+### Historical: Phase 6 compact-shell
+
+An earlier draft of this doc described a tab-based compact-shell with `#launcher`, `#tree-drawer`, `#tabbar`, and sidebar-free nav. That shell is not wired in the current `index.html` — the sidebar + detail pattern above is what lives. If you find references to `compact-shell`, `tabbar`, or `tree-drawer` in old commits, they belong to a rollback.
 
 ## File layout inside `index.html`
 
