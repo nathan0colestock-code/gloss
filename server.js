@@ -26,6 +26,9 @@ const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, pa
         classifyRowForCrossKind, generateTopicalIndexEntries } = require('./ai');
 const google = require('./google');
 
+const DEBUG = process.env.DEBUG === '1';
+const dbg = (...args) => { if (DEBUG) console.log(...args); };
+
 // Fetch Google Docs/Drive content for artifacts/references when their URL is
 // a recognized Google URL. Errors are swallowed into fetched_error so a bad
 // link (or disconnected OAuth) doesn't block the save.
@@ -69,7 +72,7 @@ async function pollGoogleDriveForNewFiles() {
     try {
       pageToken = await google.getDriveChangesStartToken();
       db.saveDrivePageToken(pageToken);
-      console.log('[drive-poll] initialized page token');
+      dbg('[drive-poll] initialized page token');
     } catch (e) {
       console.warn('[drive-poll] failed to get start token:', e.message);
     }
@@ -141,7 +144,7 @@ async function pollGoogleDriveForNewFiles() {
     }
   }
 
-  if (captured) console.log(`[drive-poll] captured ${captured}/${files.length} new Drive files`);
+  if (captured) dbg(`[drive-poll] captured ${captured}/${files.length} new Drive files`);
 }
 const REFERENCES_DIR = path.join(__dirname, 'data', 'references');
 fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
@@ -1178,7 +1181,7 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
     throw new Error(`pdfinfo failed: ${err.stderr || err.message}`);
   }
   if (!pageCount) throw new Error('pdfinfo reported 0 pages');
-  console.log(`  [PDF] ${pageCount} pages — rendering at ${PDF_DPI} DPI with ${PDF_RENDER_CONCURRENCY}-way parallelism`);
+  dbg(`  [PDF] ${pageCount} pages — rendering at ${PDF_DPI} DPI with ${PDF_RENDER_CONCURRENCY}-way parallelism`);
 
   // State shared across the render / probe / parse pipeline.
   const rollingContext = db.getRecentPagesForContext(null, null, 3).map(ctxPageToHint);
@@ -1278,7 +1281,7 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
         resultsByScan[job.scanNum] = result.pages;
         totalItems += result.items_count;
         totalBacklog += result.backlog_count;
-        console.log(`  [PDF] parsed scan ${job.scanNum}/${pageCount} → ${result.pages.length} logical page(s)`);
+        dbg(`  [PDF] parsed scan ${job.scanNum}/${pageCount} → ${result.pages.length} logical page(s)`);
         if (typeof onPageComplete === 'function') {
           for (const pr of result.pages) {
             try { onPageComplete({ ...pr, scan_num: job.scanNum, total_scans: pageCount }); }
@@ -1873,7 +1876,7 @@ app.patch('/api/backlog/:id', (req, res) => {
       const entry = db.extractGlossaryEntryFromBacklog(row.subject, answer);
       if (entry) {
         db.upsertGlossaryTerm({ ...entry, sourceBacklogId: row.id });
-        console.log(`  [glossary] learned: ${entry.term} → ${entry.meaning}`);
+        dbg(`  [glossary] learned: ${entry.term} → ${entry.meaning}`);
       }
       const answeredTerm = extractQuotedTermFromSubject(row.subject);
       if (answeredTerm) {
@@ -1886,7 +1889,7 @@ app.patch('/api/backlog/:id', (req, res) => {
             closed++;
           }
         }
-        if (closed) console.log(`  [backlog] auto-closed ${closed} duplicate(s) for term '${answeredTerm}'`);
+        if (closed) dbg(`  [backlog] auto-closed ${closed} duplicate(s) for term '${answeredTerm}'`);
       }
     } catch (e) {
       console.warn('term learning/auto-close failed:', e.message);
@@ -1901,7 +1904,7 @@ app.patch('/api/backlog/:id', (req, res) => {
           let dl = db.findDailyLogByDate(isoDate);
           if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: isoDate });
           try { db.linkPageToDailyLog(row.context_page_id, dl.id, 1.0); } catch (_) {}
-          console.log(`  [audit] filed ${row.context_page_id} to daily log ${isoDate}`);
+          dbg(`  [audit] filed ${row.context_page_id} to daily log ${isoDate}`);
         }
       } catch (e) { console.warn('audit date filing failed:', e.message); }
       res.json({ ok: true });
@@ -1916,7 +1919,7 @@ app.patch('/api/backlog/:id', (req, res) => {
           let coll = db.findCollection('topical', title);
           if (!coll) coll = db.createCollection({ id: crypto.randomUUID(), kind: 'topical', title });
           try { db.linkPageToCollection(row.context_page_id, coll.id, 1.0); } catch (_) {}
-          console.log(`  [audit] filed ${row.context_page_id} to collection "${title}"`);
+          dbg(`  [audit] filed ${row.context_page_id} to collection "${title}"`);
         }
       } catch (e) { console.warn('audit collection filing failed:', e.message); }
       res.json({ ok: true });
@@ -2084,42 +2087,6 @@ app.post('/api/indexes/topics', (req, res) => {
 });
 app.get('/api/indexes/books', (req, res) => {
   res.json({ entries: db.getBooksIndex() });
-});
-
-// ── Projects ────────────────────────────────────────────────────────────────
-// Phase 2 — `/api/projects` is now a thin shim over `/api/collections` with
-// kind='project'. Old callers see the same shape; new code should just call
-// /api/collections?kind=project. Sets a Deprecation header so the UI/devtools
-// flag the legacy path.
-function _deprecate(res) { res.set('Deprecation', 'true'); res.set('Link', '</api/collections?kind=project>; rel="successor-version"'); }
-app.get('/api/projects', (req, res) => {
-  _deprecate(res);
-  const grouped = db.listCollectionsGrouped({ includeArchived: false });
-  const group = grouped.find(g => g.kind === 'project');
-  res.json({ items: group ? group.collections : [] });
-});
-app.post('/api/projects', (req, res) => {
-  _deprecate(res);
-  const { title, description, target_date, status } = req.body || {};
-  if (!title) return res.status(400).json({ error: 'title is required' });
-  const coll = db.createCollection({ id: crypto.randomUUID(), kind: 'project', title, description, target_date, status });
-  res.json(coll);
-});
-app.patch('/api/projects/:id', (req, res) => {
-  _deprecate(res);
-  const { title, description, target_date, status } = req.body || {};
-  try {
-    const c = db.updateCollection(req.params.id, { title, description, target_date, status });
-    if (!c) return res.status(404).json({ error: 'Not found' });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-app.delete('/api/projects/:id', (req, res) => {
-  _deprecate(res);
-  try { db.deleteCollection(req.params.id); res.json({ ok: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Unified indexes (Phase 3) ───────────────────────────────────────────────
