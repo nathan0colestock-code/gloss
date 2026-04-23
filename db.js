@@ -1931,7 +1931,7 @@ function insertBacklogItems(items) {
         if (personAliasKnown.get(name)) continue;
       }
       const optionsJson = r.answer_options ? JSON.stringify(r.answer_options) : null;
-      stmt.run(r.id, r.kind, r.subject, r.proposal, r.context_page_id ?? null, r.answer_format ?? null, optionsJson);
+      stmt.run(r.id, r.kind, r.subject, r.proposal ?? r.subject, r.context_page_id ?? null, r.answer_format ?? null, optionsJson);
     }
   });
   insertMany(items);

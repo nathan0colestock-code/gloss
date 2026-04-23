@@ -1,104 +1,76 @@
 #!/usr/bin/env node
-// Ingest E PDFs + C doc 5 one at a time.
-// Tolerates server crashing mid-stream — monitors DB until pages stabilize.
-const { execSync, spawn } = require('child_process');
-const http = require('http');
+const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const FOXED = '/Users/nathancolestock/foxed';
 const BASE = path.join(process.env.HOME, 'Desktop/notebook import');
-process.chdir(FOXED);
-const db = require('better-sqlite3')(path.join(FOXED, 'data/foxed.db'));
+const FOXED = '/Users/nathancolestock/foxed';
 
 function log(msg) { console.log(`[${new Date().toISOString().slice(11,19)}] ${msg}`); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function md5(f) { return crypto.createHash('md5').update(fs.readFileSync(f)).digest('hex'); }
-function pageCount(vol) { return db.prepare('SELECT COUNT(*) n FROM pages WHERE volume=?').get(vol).n; }
-function failureCount() { return db.prepare("SELECT COUNT(*) n FROM ingest_failures WHERE status='failed'").get().n; }
-function pdftoppmRunning() { try { const r = execSync('pgrep -c pdftoppm', {encoding:'utf8'}).trim(); return parseInt(r) > 0; } catch(_) { return false; } }
-function serverUp() { return new Promise(r => { const req = http.request({hostname:'localhost',port:3747,path:'/api/collections',method:'GET',timeout:3000}, res => r(res.statusCode < 500)); req.on('error', () => r(false)); req.on('timeout', () => { req.destroy(); r(false); }); req.end(); }); }
 
-async function waitForIdle(vol, pagesBefore) {
-  log(`  Waiting for processing to complete (vol=${vol}, baseline=${pagesBefore})...`);
-  let stable = 0;
-  let lastCount = pagesBefore;
-  while (stable < 4) {
-    await sleep(10000);
-    const current = pageCount(vol);
-    const rendering = pdftoppmRunning();
-    if (current !== lastCount) { stable = 0; lastCount = current; log(`  ...${current} pages (${vol})`); }
-    else if (!rendering) { stable++; }
-    else { stable = 0; }
-    if (stable >= 4 && !rendering) break;
-  }
-  return pageCount(vol);
+function dbGet(sql, ...params) {
+  const db = require('better-sqlite3')(path.join(FOXED, 'data/foxed.db'));
+  const result = db.prepare(sql).get(...params);
+  db.close();
+  return result;
+}
+
+function pageCount(vol) { return dbGet('SELECT COUNT(*) n FROM pages WHERE volume=?', vol).n; }
+function failureCount() { return dbGet("SELECT COUNT(*) n FROM ingest_failures WHERE status='failed'").n; }
+
+function serverUp() {
+  try {
+    const r = spawnSync('/usr/bin/curl', ['-s', '--max-time', '3', 'http://localhost:3747/api/collections'], {encoding:'utf8'});
+    return r.status === 0 && r.stdout.length > 10;
+  } catch(_) { return false; }
 }
 
 async function waitForServer() {
   for (let i = 0; i < 30; i++) {
-    if (await serverUp()) return true;
-    log('  Server not ready, waiting...');
+    if (serverUp()) return true;
+    log('  Server not ready, waiting 3s...');
     await sleep(3000);
   }
   return false;
 }
 
-function postPdf(pdfPath, volume) {
-  return new Promise((resolve) => {
-    const boundary = '----FormBoundary' + crypto.randomUUID().replace(/-/g,'');
-    const fileContent = fs.readFileSync(pdfPath);
-    const basename = path.basename(pdfPath);
-    const body = Buffer.concat([
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="scan"; filename="${basename}"\r\nContent-Type: application/pdf\r\n\r\n`),
-      fileContent,
-      Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="volume"\r\n\r\n${volume}\r\n--${boundary}--\r\n`)
-    ]);
-    const options = {
-      hostname: 'localhost', port: 3747,
-      path: '/api/ingest/stream', method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length },
-      timeout: 14400000,
-    };
-    let pages = 0, gotDone = false, uuid = null, buf = '';
-    const req = http.request(options, res => {
-      res.setEncoding('utf8');
-      res.on('data', chunk => {
-        buf += chunk;
-        for (const line of buf.split('\n')) {
-          buf = buf.slice(line.length + 1);
-          if (!line.trim()) continue;
-          try {
-            const ev = JSON.parse(line);
-            if (ev.type === 'page') {
-              pages++;
-              if (!uuid && ev.page && ev.page.scan_path) {
-                const m = ev.page.scan_path.match(/\/scans\/([0-9a-f-]{36})-/);
-                if (m) uuid = m[1];
-              }
-              process.stdout.write('.');
-            } else if (ev.type === 'done') { gotDone = true; console.log(''); }
-            else if (ev.type === 'error') log(`  ERR: ${ev.error}`);
-          } catch(_) {}
-        }
-      });
-      res.on('end', () => resolve({ pages, gotDone, uuid }));
-    });
-    req.on('error', e => { console.log(''); resolve({ pages, gotDone, uuid, err: e.message }); });
-    req.write(body);
-    req.end();
-  });
+async function waitForIdle(vol, baseline) {
+  log(`  Waiting for DB to stabilize (baseline=${baseline})...`);
+  let stable = 0, last = baseline;
+  while (stable < 4) {
+    await sleep(10000);
+    const current = pageCount(vol);
+    if (current !== last) { stable = 0; last = current; log(`  ...${current} pages (${vol})`); }
+    else stable++;
+  }
+  return pageCount(vol);
+}
+
+function curlIngest(pdfPath, vol) {
+  const tmp = `/tmp/ingest-${vol}-${path.basename(pdfPath).replace(/ /g,'_')}.log`;
+  const result = spawnSync('/usr/bin/curl', [
+    '-sS', '--max-time', '14400', '-N',
+    '-F', `scan=@${pdfPath}`,
+    '-F', `volume=${vol}`,
+    'http://localhost:3747/api/ingest/stream'
+  ], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+  fs.writeFileSync(tmp, result.stdout + result.stderr);
+  const pages = (result.stdout.match(/"type":"page"/g) || []).length;
+  const done = result.stdout.includes('"type":"done"');
+  const uuidMatch = result.stdout.match(/\/scans\/([0-9a-f-]{36})-/);
+  return { rc: result.status, pages, done, uuid: uuidMatch ? uuidMatch[1] : null, err: result.stderr.trim() };
 }
 
 function writeSidecar(pdfPath, vol, pagesIngested, uuid) {
-  const sidecar = {
+  fs.writeFileSync(pdfPath + '.ingested', JSON.stringify({
     pdf_path: pdfPath, pdf_basename: path.basename(pdfPath), volume: vol,
-    pdf_md5: md5(pdfPath), upload_uuid: uuid, pages_ingested: pagesIngested,
+    pdf_md5: md5(pdfPath), upload_uuid: uuid || '', pages_ingested: pagesIngested,
     ingested_at_utc: new Date().toISOString(), marker_version: 1,
-  };
-  fs.writeFileSync(pdfPath + '.ingested', JSON.stringify(sidecar, null, 2));
-  log(`  Sidecar written`);
+  }, null, 2));
+  log('  Sidecar written');
 }
 
 async function ingestOne(pdfPath, vol) {
@@ -110,36 +82,31 @@ async function ingestOne(pdfPath, vol) {
     fs.unlinkSync(sidecar);
   }
 
-  if (!await waitForServer()) throw new Error('Server not up');
+  if (!await waitForServer()) throw new Error('Server down');
   const before = pageCount(vol);
-  const failsBefore = failureCount();
   log(`START ${vol}/${base} (${(fs.statSync(pdfPath).size/1024/1024).toFixed(1)}MB) — ${before} pages now`);
 
-  const result = await postPdf(pdfPath, vol);
-  log(`  stream: pages=${result.pages} done=${result.gotDone} err=${result.err||'none'}`);
+  const stream = curlIngest(pdfPath, vol);
+  log(`  stream: rc=${stream.rc} pages=${stream.pages} done=${stream.done} ${stream.err||''}`);
 
-  // Whether stream succeeded or server crashed, wait for processing to fully settle
   const after = await waitForIdle(vol, before);
   const added = after - before;
-  const failsAfter = failureCount();
-  const newFails = failsAfter - failsBefore;
-  log(`  Done: ${added} pages added, ${newFails} new failures, total ${vol}=${after}`);
+  log(`  Done: +${added} pages, total ${vol}=${after}, failures=${failureCount()}`);
 
-  // Get UUID from newly added pages if stream didn't give us one
-  let uuid = result.uuid;
+  // Get UUID from DB if stream didn't provide it
+  let uuid = stream.uuid;
   if (!uuid && added > 0) {
-    const newPage = db.prepare('SELECT scan_path FROM pages WHERE volume=? ORDER BY rowid DESC LIMIT 1').get(vol);
-    if (newPage && newPage.scan_path) {
-      const m = newPage.scan_path.match(/\/scans\/([0-9a-f-]{36})-/);
-      if (m) uuid = m[1];
-    }
+    const db = require('better-sqlite3')(path.join(FOXED, 'data/foxed.db'));
+    const row = db.prepare('SELECT scan_path FROM pages WHERE volume=? ORDER BY rowid DESC LIMIT 1').get(vol);
+    db.close();
+    if (row) { const m = row.scan_path.match(/\/scans\/([0-9a-f-]{36})-/); if (m) uuid = m[1]; }
   }
-  if (added > 0 || result.gotDone) writeSidecar(pdfPath, vol, added, uuid || '');
+
+  if (added > 0 || stream.done) writeSidecar(pdfPath, vol, added, uuid);
 }
 
 async function main() {
   const pdfs = [
-    { vol: 'C', name: 'Scanned Document 5.pdf' },
     { vol: 'E', name: 'Scanned Document.pdf' },
     { vol: 'E', name: 'Scanned Document 2.pdf' },
     { vol: 'E', name: 'Scanned Document 3.pdf' },
@@ -147,60 +114,37 @@ async function main() {
     { vol: 'E', name: 'Scanned Document 5.pdf' },
   ];
 
-  for (const { vol, name } of pdfs) {
+  for (let i = 0; i < pdfs.length; i++) {
+    const { vol, name } = pdfs[i];
     const pdfPath = path.join(BASE, vol, name);
     if (!fs.existsSync(pdfPath)) { log(`MISSING: ${vol}/${name}`); continue; }
     await ingestOne(pdfPath, vol);
-    log('Waiting 45s before next PDF...');
-    await sleep(45000);
+    if (i < pdfs.length - 1) { log('Waiting 45s...'); await sleep(45000); }
   }
 
-  // Final retry pass
-  log('\n=== Final retry-all pass ===');
-  const remaining = failureCount();
-  log(`${remaining} failures queued`);
-  if (remaining > 0) {
-    await new Promise((resolve) => {
-      let buf = '';
-      const options = { hostname:'localhost', port:3747, path:'/api/ingest-failures/retry-all', method:'POST', timeout:7200000 };
-      const req = http.request(options, res => {
-        res.setEncoding('utf8');
-        res.on('data', c => {
-          buf += c;
-          for (const line of buf.split('\n')) {
-            buf = buf.slice(line.length + 1);
-            if (!line.trim()) continue;
-            try {
-              const ev = JSON.parse(line);
-              if (ev.type === 'resolved') process.stdout.write('✓');
-              else if (ev.type === 'failed') process.stdout.write('✗');
-              else if (ev.type === 'done') { console.log(''); log(`retry-all done: resolved=${ev.resolved} still_failed=${ev.still_failed}`); }
-            } catch(_) {}
-          }
-        });
-        res.on('end', resolve);
-      });
-      req.on('error', e => { log(`retry-all error: ${e.message}`); resolve(); });
-      req.end();
-    });
+  // Retry-all pass
+  log('\n=== retry-all pass ===');
+  const rem = failureCount();
+  log(`${rem} failures queued`);
+  if (rem > 0) {
+    const r = spawnSync('/usr/bin/curl', ['-sS', '--max-time', '7200', '-N', '-X', 'POST',
+      'http://localhost:3747/api/ingest-failures/retry-all'], {encoding:'utf8', maxBuffer:10*1024*1024});
+    const resolved = (r.stdout.match(/"type":"resolved"/g)||[]).length;
+    const failed = (r.stdout.match(/"type":"failed"/g)||[]).length;
+    log(`retry-all: resolved=${resolved} still_failed=${failed}`);
   }
 
   // Verify
   log('\n=== VERIFICATION ===');
-  const pages = db.prepare('SELECT volume, COUNT(*) n FROM pages GROUP BY volume ORDER BY volume').all();
-  pages.forEach(r => log(`  ${r.volume||'(null)'}: ${r.n} pages`));
+  const db = require('better-sqlite3')(path.join(FOXED, 'data/foxed.db'));
+  db.prepare('SELECT volume, COUNT(*) n FROM pages GROUP BY volume ORDER BY volume').all()
+    .forEach(r => log(`  ${r.volume||'(null)'}: ${r.n}`));
   log(`  failures remaining: ${failureCount()}`);
-  const crossVol = db.prepare(`
-    SELECT COUNT(*) n FROM links l
-    JOIN pages pf ON pf.id=l.from_id JOIN pages pt ON pt.id=l.to_id
-    WHERE l.from_type='page' AND l.to_type='page' AND pf.volume!=pt.volume
-  `).get().n;
-  log(`  cross-volume page links: ${crossVol} ${crossVol===0?'(OK)':'(FIXING)'}`);
-  if (crossVol > 0) {
-    db.prepare(`DELETE FROM links WHERE id IN (SELECT l.id FROM links l JOIN pages pf ON pf.id=l.from_id JOIN pages pt ON pt.id=l.to_id WHERE l.from_type='page' AND l.to_type='page' AND pf.volume!=pt.volume)`).run();
-    log('  Cross-volume links deleted');
-  }
+  const x = db.prepare(`SELECT COUNT(*) n FROM links l JOIN pages pf ON pf.id=l.from_id JOIN pages pt ON pt.id=l.to_id WHERE l.from_type='page' AND l.to_type='page' AND pf.volume!=pt.volume`).get().n;
+  log(`  cross-volume links: ${x} ${x===0?'(OK)':'(FIXING)'}`);
+  if (x > 0) { db.prepare(`DELETE FROM links WHERE id IN (SELECT l.id FROM links l JOIN pages pf ON pf.id=l.from_id JOIN pages pt ON pt.id=l.to_id WHERE l.from_type='page' AND l.to_type='page' AND pf.volume!=pt.volume)`).run(); log('  -> deleted'); }
+  db.close();
   log('=== Complete ===');
 }
 
-main().catch(e => { console.error('FATAL:', e); process.exit(1); });
+main().catch(e => { log('FATAL: ' + e.message); process.exit(1); });
