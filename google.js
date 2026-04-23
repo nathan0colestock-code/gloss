@@ -7,22 +7,34 @@
 //   4. fetchContentForUrl(url) resolves a Docs/Drive URL to plain text, using the
 //      refresh_token to mint short-lived access_tokens as needed.
 //
-// Credentials come from the JSON file at GOOGLE_OAUTH_CLIENT_JSON (env var), or,
-// if unset, from the hard-coded path below. In either case, the file is the
-// "installed" client JSON downloaded from the GCP console (Desktop app client).
+// Credentials come from the JSON file at GOOGLE_OAUTH_CLIENT_JSON (env var).
+// If unset or the file is missing, the module goes into disabled mode: every
+// exported function returns { enabled: false, reason } instead of throwing.
 
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 
-const DEFAULT_CLIENT_JSON = '/Users/nathancolestock/Downloads/client_secret_591963216284-5stv621t6i2gsosbeg1a7a5es87k94fs.apps.googleusercontent.com.json';
+let DISABLED_REASON = null;
+(function checkEnabled() {
+  const p = process.env.GOOGLE_OAUTH_CLIENT_JSON;
+  if (!p) { DISABLED_REASON = 'GOOGLE_OAUTH_CLIENT_JSON env var not set'; return; }
+  if (!fs.existsSync(p)) { DISABLED_REASON = `GOOGLE_OAUTH_CLIENT_JSON path does not exist: ${p}`; return; }
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (!(raw.installed || raw.web)) DISABLED_REASON = 'Google OAuth client JSON missing installed/web section';
+  } catch (e) {
+    DISABLED_REASON = `Google OAuth client JSON unreadable: ${e.message}`;
+  }
+})();
+
+const isDisabled = () => DISABLED_REASON !== null;
+const disabledShim = () => ({ enabled: false, reason: DISABLED_REASON });
 
 function loadClient() {
-  const p = process.env.GOOGLE_OAUTH_CLIENT_JSON || DEFAULT_CLIENT_JSON;
-  if (!fs.existsSync(p)) return null;
-  const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-  const inst = raw.installed || raw.web || null;
-  if (!inst) return null;
+  if (isDisabled()) return null;
+  const raw = JSON.parse(fs.readFileSync(process.env.GOOGLE_OAUTH_CLIENT_JSON, 'utf8'));
+  const inst = raw.installed || raw.web;
   return {
     client_id: inst.client_id,
     client_secret: inst.client_secret,
@@ -45,6 +57,7 @@ function getRedirectUri(req) {
 }
 
 function buildAuthUrl(req) {
+  if (isDisabled()) return disabledShim();
   const client = loadClient();
   if (!client) throw new Error('Google OAuth client JSON not found. Set GOOGLE_OAUTH_CLIENT_JSON env var.');
   const params = new URLSearchParams({
@@ -60,6 +73,7 @@ function buildAuthUrl(req) {
 }
 
 async function exchangeCode(code, req) {
+  if (isDisabled()) return disabledShim();
   const client = loadClient();
   if (!client) throw new Error('Google OAuth client JSON not found');
   const body = new URLSearchParams({
@@ -88,6 +102,7 @@ async function exchangeCode(code, req) {
 }
 
 async function getAccessToken() {
+  if (isDisabled()) return disabledShim();
   const row = db.getGoogleTokens();
   if (!row || !row.refresh_token) throw new Error('Google not connected — visit /api/google/connect first');
   if (row.access_token && row.expires_at && new Date(row.expires_at) > new Date()) {
@@ -147,9 +162,11 @@ function parseGoogleUrl(url) {
 }
 
 async function fetchContentForUrl(url) {
+  if (isDisabled()) return disabledShim();
   const parsed = parseGoogleUrl(url);
   if (!parsed) throw new Error('Not a recognized Google Docs/Drive URL');
   const token = await getAccessToken();
+  if (token && token.enabled === false) return token;
   const headers = { Authorization: `Bearer ${token}` };
 
   if (parsed.kind === 'doc') {
@@ -199,7 +216,9 @@ async function fetchContentForUrl(url) {
 // Returns the current start page token for the Drive Changes API. Call once to
 // initialize tracking — files created before this point will not be surfaced.
 async function getDriveChangesStartToken() {
+  if (isDisabled()) return disabledShim();
   const token = await getAccessToken();
+  if (token && token.enabled === false) return token;
   const resp = await fetch('https://www.googleapis.com/drive/v3/changes/startPageToken', {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -215,7 +234,9 @@ const BINARY_IMAGE_MIMES = new Set(['image/jpeg','image/png','image/gif','image/
 // Poll the Drive Changes API starting from pageToken. Paginates automatically.
 // Returns { files: [{id, name, mimeType, webViewLink, parents}], newPageToken }.
 async function pollDriveChanges(pageToken) {
+  if (isDisabled()) return disabledShim();
   const token = await getAccessToken();
+  if (token && token.enabled === false) return token;
   const headers = { Authorization: `Bearer ${token}` };
   const files = [];
   let cursor = pageToken;
@@ -253,7 +274,9 @@ async function pollDriveChanges(pageToken) {
 
 // Download a Drive file's binary content to destPath by streaming.
 async function downloadDriveFile(fileId, destPath) {
+  if (isDisabled()) return disabledShim();
   const token = await getAccessToken();
+  if (token && token.enabled === false) return token;
   const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -277,10 +300,21 @@ async function downloadDriveFile(fileId, destPath) {
 }
 
 function isConfigured() {
-  return !!loadClient();
+  return !isDisabled() && !!loadClient();
+}
+
+function isEnabled() {
+  return !isDisabled();
+}
+
+function disabledReason() {
+  return DISABLED_REASON;
 }
 
 function status() {
+  if (isDisabled()) {
+    return { configured: false, connected: false, enabled: false, reason: DISABLED_REASON };
+  }
   const row = db.getGoogleTokens();
   return {
     configured: isConfigured(),
@@ -297,6 +331,8 @@ module.exports = {
   fetchContentForUrl,
   parseGoogleUrl,
   isConfigured,
+  isEnabled,
+  disabledReason,
   status,
   getDriveChangesStartToken,
   pollDriveChanges,

@@ -14,6 +14,7 @@ const fs = require('fs');
 })();
 
 const express = require('express');
+const helmet = require('helmet');
 const multer = require('multer');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
@@ -34,9 +35,12 @@ const dbg = (...args) => { if (DEBUG) console.log(...args); };
 // link (or disconnected OAuth) doesn't block the save.
 async function fetchIfGoogle(kind, id, url) {
   if (!url || !google.parseGoogleUrl(url)) return null;
+  if (!google.isEnabled()) return { ok: false, disabled: true, reason: google.disabledReason() };
   const now = new Date().toISOString();
   try {
-    const { content } = await google.fetchContentForUrl(url);
+    const result = await google.fetchContentForUrl(url);
+    if (result && result.enabled === false) return { ok: false, disabled: true, reason: result.reason };
+    const { content } = result;
     const updater = kind === 'artifact' ? db.updateArtifactContent : db.updateReferenceContent;
     updater(id, { fetched_content: content, fetched_at: now, fetched_error: null });
     return { ok: true };
@@ -63,6 +67,7 @@ function extFromMimeOrName(mimeType, name) {
 // Poll Google Drive for new files and auto-capture them. Called at startup and
 // on an interval. Also triggered by POST /api/google/poll.
 async function pollGoogleDriveForNewFiles() {
+  if (!google.isEnabled()) return;
   const tokens = db.getGoogleTokens();
   if (!tokens || !tokens.refresh_token) return;
 
@@ -70,7 +75,9 @@ async function pollGoogleDriveForNewFiles() {
   if (!pageToken) {
     // First run: seed the cursor so we only see files created from now on.
     try {
-      pageToken = await google.getDriveChangesStartToken();
+      const startToken = await google.getDriveChangesStartToken();
+      if (startToken && startToken.enabled === false) return;
+      pageToken = startToken;
       db.saveDrivePageToken(pageToken);
       dbg('[drive-poll] initialized page token');
     } catch (e) {
@@ -81,7 +88,9 @@ async function pollGoogleDriveForNewFiles() {
 
   let files, newPageToken;
   try {
-    ({ files, newPageToken } = await google.pollDriveChanges(pageToken));
+    const result = await google.pollDriveChanges(pageToken);
+    if (result && result.enabled === false) return;
+    ({ files, newPageToken } = result);
   } catch (e) {
     console.warn('[drive-poll] poll failed:', e.message);
     return;
@@ -151,9 +160,132 @@ fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
 fs.mkdirSync(REFERENCES_DIR, { recursive: true });
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3747;
 
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: false, limit: '2mb' }));
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+const IS_PROD = process.env.NODE_ENV === 'production';
+let AUTH_PASSWORD = process.env.AUTH_PASSWORD;
+let SESSION_SECRET = process.env.SESSION_SECRET;
+if (IS_PROD) {
+  if (!AUTH_PASSWORD || !SESSION_SECRET) {
+    console.error('[auth] AUTH_PASSWORD and SESSION_SECRET must be set in production.');
+    process.exit(1);
+  }
+} else {
+  if (!AUTH_PASSWORD) { AUTH_PASSWORD = 'dev'; console.warn('\x1b[33m[auth] AUTH_PASSWORD unset — using dev fallback "dev"\x1b[0m'); }
+  if (!SESSION_SECRET) { SESSION_SECRET = 'dev'; console.warn('\x1b[33m[auth] SESSION_SECRET unset — using dev fallback "dev"\x1b[0m'); }
+}
+const COOKIE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+const AUTH_BYPASS = new Set(['/login', '/api/login', '/api/logout', '/api/health', '/favicon.ico']);
+
+function signCookie(payload) {
+  const p = Buffer.from(String(payload), 'utf8').toString('base64url');
+  const mac = crypto.createHmac('sha256', SESSION_SECRET).update(p).digest('hex');
+  return `${p}.${mac}`;
+}
+function verifyCookie(raw) {
+  if (!raw || typeof raw !== 'string') return false;
+  const dot = raw.lastIndexOf('.');
+  if (dot < 0) return false;
+  const p = raw.slice(0, dot);
+  const mac = raw.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(p).digest('hex');
+  const a = Buffer.from(mac, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  const ts = parseInt(Buffer.from(p, 'base64url').toString('utf8'), 10);
+  if (!Number.isFinite(ts)) return false;
+  if (Date.now() - ts > COOKIE_MAX_AGE_MS) return false;
+  return true;
+}
+function parseAuthCookie(req) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k === 'foxed_auth') return rest.join('=');
+  }
+  return null;
+}
+function requireAuth(req, res, next) {
+  if (AUTH_BYPASS.has(req.path)) return next();
+  if (verifyCookie(parseAuthCookie(req))) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'auth required' });
+  return res.redirect('/login');
+}
+
+const LOGIN_RATE = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX = 5;
+function loginRateLimit(req, res, next) {
+  const key = req.ip || 'unknown';
+  const now = Date.now();
+  const rec = LOGIN_RATE.get(key);
+  if (rec && now - rec.firstAttemptAt > LOGIN_WINDOW_MS) LOGIN_RATE.delete(key);
+  const cur = LOGIN_RATE.get(key);
+  if (cur && cur.count >= LOGIN_MAX) {
+    const retry = Math.ceil((cur.firstAttemptAt + LOGIN_WINDOW_MS - now) / 1000);
+    res.set('Retry-After', String(Math.max(retry, 1)));
+    return res.status(429).json({ error: 'too many attempts' });
+  }
+  if (LOGIN_RATE.size > 1000) {
+    for (const [k, v] of LOGIN_RATE) {
+      if (now - v.firstAttemptAt > LOGIN_WINDOW_MS) LOGIN_RATE.delete(k);
+    }
+  }
+  next();
+}
+function recordLoginAttempt(req) {
+  const key = req.ip || 'unknown';
+  const cur = LOGIN_RATE.get(key);
+  if (cur) cur.count++;
+  else LOGIN_RATE.set(key, { count: 1, firstAttemptAt: Date.now() });
+}
+
+app.get('/api/health', (req, res) => res.json({ ok: true, now: Date.now() }));
+
+app.get('/login', (req, res) => {
+  const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';
+  res.type('html').send(`<!doctype html><meta charset=utf-8><title>Foxed · Sign in</title>
+<style>body{font:16px system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#faf8f4}
+form{display:flex;flex-direction:column;gap:.75rem;padding:2rem;border:1px solid #ddd;border-radius:8px;background:#fff;min-width:260px}
+input,button{font:inherit;padding:.5rem .75rem;border:1px solid #ccc;border-radius:4px}
+button{background:#222;color:#fff;border-color:#222;cursor:pointer}</style>
+<form method="POST" action="/api/login"><h2 style="margin:0 0 .5rem">Foxed</h2>${err}
+<input type="password" name="password" autofocus required placeholder="Password"/>
+<button type="submit">Sign in</button></form>`);
+});
+
+app.post('/api/login', loginRateLimit, (req, res) => {
+  const pw = (req.body && typeof req.body.password === 'string') ? req.body.password : '';
+  const a = Buffer.from(pw);
+  const b = Buffer.from(AUTH_PASSWORD);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!ok) {
+    recordLoginAttempt(req);
+    if (req.is('json')) return res.status(401).json({ error: 'wrong password' });
+    return res.redirect('/login?error=1');
+  }
+  const cookie = signCookie(Date.now());
+  const secure = IS_PROD ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `foxed_auth=${cookie}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${Math.floor(COOKIE_MAX_AGE_MS / 1000)}`);
+  if (req.is('json')) return res.json({ ok: true });
+  res.redirect('/');
+});
+
+app.post('/api/logout', (req, res) => {
+  res.setHeader('Set-Cookie', 'foxed_auth=; Path=/; Max-Age=0');
+  if (req.is('json')) return res.json({ ok: true });
+  res.redirect('/login');
+});
+
+app.use(requireAuth);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Serve scan images, artifacts, references
@@ -2478,14 +2610,21 @@ app.post('/api/collections/:id/entity-links', (req, res) => {
 
 // ── Google OAuth ────────────────────────────────────────────────────────────
 app.get('/api/google/connect', (req, res) => {
-  try { res.redirect(google.buildAuthUrl(req)); }
+  if (!google.isEnabled()) return res.status(503).send(`<pre>Google integration disabled: ${google.disabledReason()}</pre>`);
+  try {
+    const url = google.buildAuthUrl(req);
+    if (url && url.enabled === false) return res.status(503).send(`<pre>Google integration disabled: ${url.reason}</pre>`);
+    res.redirect(url);
+  }
   catch (e) { res.status(500).send(`<pre>${String(e.message || e)}</pre>`); }
 });
 app.get('/api/google/oauth-callback', async (req, res) => {
+  if (!google.isEnabled()) return res.status(503).send(`<pre>Google integration disabled: ${google.disabledReason()}</pre>`);
   if (req.query.error) return res.status(400).send(`<pre>Google error: ${req.query.error}</pre>`);
   if (!req.query.code) return res.status(400).send('<pre>Missing code</pre>');
   try {
-    await google.exchangeCode(req.query.code, req);
+    const result = await google.exchangeCode(req.query.code, req);
+    if (result && result.enabled === false) return res.status(503).send(`<pre>Google integration disabled: ${result.reason}</pre>`);
     res.send(`<!doctype html><meta charset=utf-8><title>Connected</title>
       <body style="font:16px system-ui;padding:2rem">
       Google connected. You can close this tab.
@@ -4250,9 +4389,13 @@ if (require.main === module) {
     console.log(`Foxed running at http://localhost:${PORT}`);
     try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
 
-    const DRIVE_POLL_MS = parseInt(process.env.GOOGLE_DRIVE_POLL_INTERVAL_MS || String(10 * 60 * 1000), 10);
-    setTimeout(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), 5000);
-    setInterval(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), DRIVE_POLL_MS);
+    if (google.isEnabled()) {
+      const DRIVE_POLL_MS = parseInt(process.env.GOOGLE_DRIVE_POLL_INTERVAL_MS || String(10 * 60 * 1000), 10);
+      setTimeout(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), 5000);
+      setInterval(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), DRIVE_POLL_MS);
+    } else {
+      console.log(`[drive-poll] disabled: ${google.disabledReason()}`);
+    }
   });
 }
 

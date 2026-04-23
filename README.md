@@ -8,6 +8,25 @@ Nothing stored in Gloss quotes your prose verbatim. Every entry is a pointer-sum
 
 ---
 
+## Surfaces
+
+### Capture
+Upload scans (images or PDFs) or transcripts. Gloss parses each logical page into entities, collections, and references.
+
+![Capture interface with notebook upload and volume selector](docs/screenshots/capture.png)
+
+### Log
+Calendar view of your notebook entries, organized by date. Click any day to see the pages you captured.
+
+![April 2026 calendar showing entries per day](docs/screenshots/log.png)
+
+### Index
+Browse collections, people, topics, scripture references, books, artifacts, and references. All auto-indexed and linked from your scans.
+
+![Index view with tabs for collections, artifacts, people, topics, scripture, books, references](docs/screenshots/index.png)
+
+---
+
 ## Stack
 
 - **Server:** Node.js + Express
