@@ -2599,12 +2599,17 @@ app.patch('/api/google/drive-config', (req, res) => {
 app.get('/api/artifacts', (req, res) => {
   res.json({ items: db.listArtifacts() });
 });
+app.get('/api/artifacts/:id', (req, res) => {
+  const a = db.getArtifactDetail(req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  res.json(a);
+});
 app.post('/api/artifacts', async (req, res) => {
-  const { title, drawer, hanging_folder, manila_folder, status, external_url,
+  const { title, drawer, hanging_folder, manila_folder, status, external_url, notes,
           collection_ids, user_index_ids } = req.body || {};
   if (!title) return res.status(400).json({ error: 'title is required' });
   const a = db.createArtifact({
-    id: crypto.randomUUID(), title, drawer, hanging_folder, manila_folder, status, external_url
+    id: crypto.randomUUID(), title, drawer, hanging_folder, manila_folder, status, external_url, notes
   });
   for (const cid of (collection_ids || [])) {
     db.linkBetween({ from_type: 'artifact', from_id: a.id, to_type: 'collection', to_id: cid });
@@ -2647,7 +2652,7 @@ app.patch('/api/artifacts/:id', async (req, res) => {
   if (body.archived !== undefined) {
     db.setArtifactArchived(req.params.id, !!body.archived);
   }
-  const updatable = ['title','drawer','hanging_folder','manila_folder','status','external_url']
+  const updatable = ['title','drawer','hanging_folder','manila_folder','status','external_url','notes']
     .some(k => body[k] !== undefined);
   if (updatable) {
     const r = db.updateArtifact(req.params.id, body);
@@ -2656,9 +2661,7 @@ app.patch('/api/artifacts/:id', async (req, res) => {
   const fetch_result = body.external_url
     ? await fetchIfGoogle('artifact', req.params.id, body.external_url)
     : null;
-  // If title or description changed, the content-hash may have shifted — re-run
-  // the cross-kind classifier (debounced, hash-skip still honored downstream).
-  if (body.title !== undefined || body.description !== undefined) {
+  if (body.title !== undefined || body.notes !== undefined) {
     scheduleCrossKindClassify('artifact', req.params.id);
   }
   res.json({ ok: true, fetch_result });
@@ -3472,6 +3475,16 @@ app.patch('/api/pages/:id', (req, res) => {
   }
 });
 
+app.delete('/api/pages/:id', (req, res) => {
+  try {
+    const result = db.softDeletePage(req.params.id);
+    if (!result.deleted) return res.status(404).json({ error: 'page not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ── POST /api/pages/:id/refile ──────────────────────────────────────────────
 // One-shot helper the UI uses to fix ingest mistakes. Body:
 //   { action: 'set-daily-log', date: 'YYYY-MM-DD' }   — replace daily_log link(s) with the one for <date>
@@ -3971,10 +3984,11 @@ app.get('/api/headings', (req, res) => {
 });
 
 app.post('/api/headings', (req, res) => {
-  const { label, description } = req.body || {};
+  const { label, description, scope } = req.body || {};
   if (!label || !String(label).trim()) return res.status(400).json({ error: 'label required' });
+  const safeScope = scope === 'artifact' ? 'artifact' : 'collection';
   try {
-    const r = db.createHeading({ label: String(label).trim(), description: description || null });
+    const r = db.createHeading({ label: String(label).trim(), description: description || null, scope: safeScope });
     res.json(r);
   } catch (err) {
     res.status(400).json({ error: err.message });

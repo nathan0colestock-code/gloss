@@ -1,7 +1,27 @@
 const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
 
 const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Large PNGs (>10MB) reliably hit Gemini's processing deadline. Convert them to
+// JPEG at 85% quality before upload — same legibility, ~90% smaller payload.
+// sips is macOS built-in; falls back to the raw file on any error.
+function prepareImageForGemini(imagePath) {
+  const ext = imagePath.split('.').pop().toLowerCase();
+  if (ext !== 'png') return { filePath: imagePath, mimeType: 'image/jpeg', cleanup: null };
+  let size = 0;
+  try { size = fs.statSync(imagePath).size; } catch { /* ignore */ }
+  if (size <= 10 * 1024 * 1024) return { filePath: imagePath, mimeType: 'image/png', cleanup: null };
+  const tmp = path.join(os.tmpdir(), `gloss-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`);
+  const r = spawnSync('/usr/bin/sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '85', imagePath, '--out', tmp], { encoding: 'utf8' });
+  if (r.status === 0 && fs.existsSync(tmp)) {
+    return { filePath: tmp, mimeType: 'image/jpeg', cleanup: () => { try { fs.unlinkSync(tmp); } catch {} } };
+  }
+  return { filePath: imagePath, mimeType: 'image/png', cleanup: null };
+}
 
 const PARSE_MODEL = 'gemini-2.5-pro';
 const CHAT_MODEL = 'gemini-2.5-flash';
@@ -235,11 +255,10 @@ function tryParseOrSalvage(raw) {
 }
 
 async function parsePageImage(imagePath, priorContext = '', recentAnsweredQuestions = [], documentOutline = '', userKindHint = null, knownHouseholds = [], knownAliases = [], handwritingCorrections = [], notebookGlossary = []) {
-  const imageData = fs.readFileSync(imagePath);
+  const img = prepareImageForGemini(imagePath);
+  const imageData = fs.readFileSync(img.filePath);
   const base64 = imageData.toString('base64');
-  const ext = imagePath.split('.').pop().toLowerCase();
-  const mediaTypeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
-  const mimeType = mediaTypeMap[ext] || 'image/jpeg';
+  const mimeType = img.mimeType;
 
   const answeredBlock = recentAnsweredQuestions.length
     ? `The user has previously answered these questions — DO NOT ask them again, and use the answers where relevant:\n${recentAnsweredQuestions.map(q => `- Q: ${q.subject}  A: ${q.answer}`).join('\n')}\n\n`
@@ -286,6 +305,7 @@ async function parsePageImage(imagePath, priorContext = '', recentAnsweredQuesti
   });
 
   const raw = (response.text || '').trim();
+  img.cleanup?.();
   if (!raw) throw new Error('Gemini returned empty response');
   const json = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
   const parsed = tryParseOrSalvage(json);
@@ -346,11 +366,10 @@ Rules:
 - Return ONLY valid JSON, no markdown fences.`;
 
 async function reexaminePage(imagePath, knownEntities, newlyConfirmed, recentAnsweredQuestions = [], knownAliases = [], handwritingCorrections = [], notebookGlossary = [], rotation = 0) {
-  const imageData = fs.readFileSync(imagePath);
+  const img = prepareImageForGemini(imagePath);
+  const imageData = fs.readFileSync(img.filePath);
   const base64 = imageData.toString('base64');
-  const ext = imagePath.split('.').pop().toLowerCase();
-  const mediaTypeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
-  const mimeType = mediaTypeMap[ext] || 'image/jpeg';
+  const mimeType = img.mimeType;
 
   // Rotation hint — the file on disk is the original (sometimes sideways) scan.
   // The user has marked this page as visually rotated by `rotation` degrees CW.
@@ -433,6 +452,7 @@ Guidance:
 
   const empty = { new_entities: [], revisions: { rename_people: [], replace_topics: [], rewrite_summary: null } };
   const raw = (response.text || '').trim();
+  img.cleanup?.();
   if (!raw) return empty;
   const json = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
   try {
