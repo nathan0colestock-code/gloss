@@ -26,6 +26,7 @@ const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, pa
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
         classifyRowForCrossKind, generateTopicalIndexEntries } = require('./ai');
 const google = require('./google');
+const comms = require('./comms');
 
 const DEBUG = process.env.DEBUG === '1';
 const dbg = (...args) => { if (DEBUG) console.log(...args); };
@@ -171,14 +172,20 @@ app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 const IS_PROD = process.env.NODE_ENV === 'production';
 let AUTH_PASSWORD = process.env.AUTH_PASSWORD;
 let SESSION_SECRET = process.env.SESSION_SECRET;
+// AUTH_ENABLED: production always requires auth; dev only if AUTH_PASSWORD is explicitly set
+const AUTH_ENABLED = IS_PROD || !!AUTH_PASSWORD;
 if (IS_PROD) {
   if (!AUTH_PASSWORD || !SESSION_SECRET) {
     console.error('[auth] AUTH_PASSWORD and SESSION_SECRET must be set in production.');
     process.exit(1);
   }
 } else {
-  if (!AUTH_PASSWORD) { AUTH_PASSWORD = 'dev'; console.warn('\x1b[33m[auth] AUTH_PASSWORD unset — using dev fallback "dev"\x1b[0m'); }
-  if (!SESSION_SECRET) { SESSION_SECRET = 'dev'; console.warn('\x1b[33m[auth] SESSION_SECRET unset — using dev fallback "dev"\x1b[0m'); }
+  if (AUTH_ENABLED) {
+    if (!SESSION_SECRET) { SESSION_SECRET = 'dev'; console.warn('\x1b[33m[auth] SESSION_SECRET unset — using dev fallback\x1b[0m'); }
+  } else {
+    console.warn('\x1b[33m[auth] AUTH_PASSWORD unset — auth disabled for local dev\x1b[0m');
+    SESSION_SECRET = SESSION_SECRET || 'dev';
+  }
 }
 const COOKIE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
 const AUTH_BYPASS = new Set(['/login', '/api/login', '/api/logout', '/api/health', '/favicon.ico']);
@@ -213,6 +220,7 @@ function parseAuthCookie(req) {
   return null;
 }
 function requireAuth(req, res, next) {
+  if (!AUTH_ENABLED) return next();
   if (AUTH_BYPASS.has(req.path)) return next();
   if (verifyCookie(parseAuthCookie(req))) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'auth required' });
@@ -251,12 +259,12 @@ app.get('/api/health', (req, res) => res.json({ ok: true, now: Date.now() }));
 
 app.get('/login', (req, res) => {
   const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';
-  res.type('html').send(`<!doctype html><meta charset=utf-8><title>Foxed · Sign in</title>
+  res.type('html').send(`<!doctype html><meta charset=utf-8><title>Gloss · Sign in</title>
 <style>body{font:16px system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#faf8f4}
 form{display:flex;flex-direction:column;gap:.75rem;padding:2rem;border:1px solid #ddd;border-radius:8px;background:#fff;min-width:260px}
 input,button{font:inherit;padding:.5rem .75rem;border:1px solid #ccc;border-radius:4px}
 button{background:#222;color:#fff;border-color:#222;cursor:pointer}</style>
-<form method="POST" action="/api/login"><h2 style="margin:0 0 .5rem">Foxed</h2>${err}
+<form method="POST" action="/api/login"><h2 style="margin:0 0 .5rem">Gloss</h2>${err}
 <input type="password" name="password" autofocus required placeholder="Password"/>
 <button type="submit">Sign in</button></form>`);
 });
@@ -4384,6 +4392,26 @@ app.post('/api/admin/dedup-pages', (req, res) => {
   }
 });
 
+// ─── Comms push — priority people → Comms app ──────────────────────────────
+// Preview the payload (no network). Useful when wiring up / debugging.
+app.get('/api/comms/preview', (req, res) => {
+  try {
+    res.json({
+      enabled: comms.isEnabled(),
+      reason: comms.disabledReason(),
+      contacts: comms.buildContactsPayload(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Trigger a push on demand. Returns the Comms response (or error).
+app.post('/api/comms/sync', async (req, res) => {
+  try {
+    const result = await comms.syncContactsToComms();
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Foxed running at http://localhost:${PORT}`);
@@ -4395,6 +4423,21 @@ if (require.main === module) {
       setInterval(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), DRIVE_POLL_MS);
     } else {
       console.log(`[drive-poll] disabled: ${google.disabledReason()}`);
+    }
+
+    if (comms.isEnabled()) {
+      const COMMS_PUSH_MS = parseInt(process.env.COMMS_PUSH_INTERVAL_MS || String(15 * 60 * 1000), 10);
+      const runPush = () => comms.syncContactsToComms()
+        .then(r => {
+          if (r.skipped) { if (DEBUG) console.log(`[comms-push] skipped: ${r.reason}`); return; }
+          if (r.ok)     console.log(`[comms-push] pushed ${r.pushed} contacts`);
+          else          console.warn(`[comms-push] failed after ${r.pushed}: ${r.error}`);
+        })
+        .catch(e => console.warn('[comms-push]', e.message));
+      setTimeout(runPush, 5000);
+      setInterval(runPush, COMMS_PUSH_MS);
+    } else {
+      console.log(`[comms-push] disabled: ${comms.disabledReason()}`);
     }
   });
 }
