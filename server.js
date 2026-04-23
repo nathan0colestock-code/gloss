@@ -4627,6 +4627,24 @@ if (require.main === module) {
       commsState.last_skipped_reason = comms.disabledReason();
       console.log(`[comms-push] disabled: ${comms.disabledReason()}`);
     }
+
+    // ── Scan-image backup (rclone → R2) ────────────────────────────────────
+    // Scan PNG/JPG/PDF blobs under /app/data/scans aren't covered by Litestream
+    // (it only replicates the SQLite file). We run a daily `rclone sync` via
+    // a bash helper. The script no-ops gracefully when R2_* env vars are
+    // missing, so this loop is safe to start before Wave 2 secrets land.
+    const SCAN_BACKUP_MS = parseInt(process.env.SCAN_BACKUP_INTERVAL_MS || String(24 * 3600 * 1000), 10);
+    const scanBackupScript = path.join(__dirname, 'scripts', 'scan-backup.sh');
+    const runScanBackup = () => {
+      execFile('/bin/bash', [scanBackupScript], { timeout: 30 * 60 * 1000 }, (err, stdout, stderr) => {
+        if (stdout) process.stdout.write(stdout);
+        if (stderr) process.stderr.write(stderr);
+        if (err) console.warn('[scan-backup] failed:', err.message);
+      });
+    };
+    // Delay the first run so we don't hammer the machine during boot.
+    setTimeout(runScanBackup, 60 * 1000);
+    setInterval(runScanBackup, SCAN_BACKUP_MS);
   });
 }
 
