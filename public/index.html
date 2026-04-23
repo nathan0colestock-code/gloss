@@ -58,6 +58,13 @@
 
   --rail-w: 220px;
   --detail-w: 0px;
+
+  /* Suite-shared tokens (vocabulary aligned with comms/black/scribe/maestro).
+   * Gloss keeps its flagship foxed-sans + custom focus treatment; the tokens
+   * live here for cross-app consistency but are not applied to body/focus. */
+  --suite-focus: #6b9bd1;
+  --suite-touch-min: 44px;
+  --suite-font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
 /* ── Dark mode ─────────────────────────── */
@@ -1098,7 +1105,12 @@ body.has-detail .tree-row-actions { display: none; }
   margin-left: auto;
 }
 
-/* ── Lightbox (scan zoom) ───────────── */
+/* ── Lightbox (scan zoom) ─────────────
+ * The lightbox itself is a scrollable container. When zoomed, the image
+ * grows beyond the viewport and overflow:auto gives native one-finger pan.
+ * touch-action: pinch-zoom on the container lets the browser pinch-zoom the
+ * image further for free, without fighting a JS transform. Rotation is kept
+ * as a CSS transform on the img (doesn't conflict with overflow scroll). */
 #lightbox {
   position: fixed; inset: 0;
   background: rgba(15, 12, 9, 0.92);
@@ -1109,23 +1121,36 @@ body.has-detail .tree-row-actions { display: none; }
   align-items: center;
   justify-content: center;
   cursor: zoom-out;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pinch-zoom;
 }
 #lightbox.open { display: flex; animation: lb-in 220ms var(--ease-decel); }
 #lightbox.open img { animation: lb-img-in 280ms var(--ease-decel); }
 @keyframes lb-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes lb-img-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 #lightbox img {
   max-width: 96vw;
   max-height: 96vh;
   box-shadow: 0 24px 60px rgba(0,0,0,0.5);
-  transition: transform 240ms ease-out;
   cursor: zoom-in;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  touch-action: manipulation;  /* remove 300ms tap delay */
 }
-#lightbox.zoomed img { cursor: grab; max-width: none; max-height: none; }
+/* When zoomed: let the image grow past the viewport so overflow:auto on the
+ * container kicks in and gives natural pan. Browser pinch still works on top. */
+#lightbox.zoomed img {
+  cursor: grab;
+  max-width: none;
+  max-height: none;
+  width: 200%;
+  height: auto;
+}
 #lightbox .lb-close {
   position: fixed; top: 16px; right: 16px;
   width: 36px; height: 36px;
@@ -1800,8 +1825,13 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
     min-height: 48px;
   }
   .tree-chevron { width: 20px; height: 20px; font-size: 11px; }
-  .tree-row-actions { opacity: 1; pointer-events: auto; flex-wrap: wrap; }
-  .tree-row-actions .btn { padding: 4px 8px; font-size: 11px; min-height: 28px; }
+  /* Hide row-level actions on mobile — on desktop they appear on hover next to
+   * the label, but on mobile they forced opacity:1 and overlapped the label
+   * text (especially in the People index). The same actions are still
+   * available in the detail panel once you tap into a row, so nothing's lost. */
+  .tree-row-actions { display: none; }
+  /* Heading-level actions (index-level, not row-level) stay — they're the
+   * "add index", "rename index" buttons and don't overlap any item. */
   .tree-heading-row .tree-actions { opacity: 1; pointer-events: auto; }
   .kind-tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
   .kind-tab { white-space: nowrap; padding: 10px 14px; min-height: 44px; }
@@ -1833,13 +1863,13 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
   .typeahead-pop input { font-size: 16px; padding: 12px 14px; }
   .typeahead-row { padding: 12px 14px; font-size: 14px; min-height: 44px; }
 
-  /* Lightbox — native pinch-zoom, thumb-reachable close */
+  /* Lightbox — thumb-reachable close + dynamic-viewport height. Zoom / pan
+   * are handled by the #lightbox container's overflow:auto + touch-action
+   * (defined outside the media query); nothing extra needed here. */
   #lightbox img {
     max-width: 100vw;
     max-height: 100vh;
     max-height: 100dvh;
-    touch-action: pinch-zoom;
-    -webkit-user-select: none;
   }
   #lightbox .lb-close {
     top: calc(10px + env(safe-area-inset-top));
@@ -2573,20 +2603,43 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── Lightbox ──────────────────────────────
+// Zoom model: tap the image to toggle `.zoomed` on the container; CSS grows
+// the image past the viewport and the container's overflow:auto lets the
+// user pan with one finger (native scroll). Browser pinch-zoom works on top
+// via touch-action: pinch-zoom. Rotation stays as an img-level CSS transform
+// since it doesn't interact with overflow scrolling.
 const lb = document.getElementById('lightbox');
 const lbImg = lb.querySelector('img');
 function openLightbox(src, rotation = 0) {
   lbImg.src = src;
-  lbImg.style.transform = `rotate(${rotation}deg)`;
+  lbImg.style.transform = rotation ? `rotate(${rotation}deg)` : '';
+  lbImg.dataset.rotation = rotation || 0;
   lb.classList.add('open');
   lb.classList.remove('zoomed');
+  lb.scrollTo(0, 0);
 }
-function closeLightbox() { lb.classList.remove('open'); lb.classList.remove('zoomed'); lbImg.src = ''; }
+function closeLightbox() {
+  lb.classList.remove('open');
+  lb.classList.remove('zoomed');
+  lbImg.src = '';
+}
 lb.addEventListener('click', (e) => {
   if (e.target === lb || e.target.classList.contains('lb-close')) { closeLightbox(); return; }
   if (e.target === lbImg) {
-    const zoomed = lb.classList.toggle('zoomed');
-    lbImg.style.transform = (zoomed ? 'scale(1.8) ' : '') + `rotate(${lbImg.dataset.rotation || 0}deg)`;
+    const wasZoomed = lb.classList.toggle('zoomed');
+    // Center the tapped point after zoom-in; reset on zoom-out.
+    if (wasZoomed) {
+      const rect = lbImg.getBoundingClientRect();
+      const offsetX = e.clientX - rect.left;
+      const offsetY = e.clientY - rect.top;
+      // After the class flips, the image is 2x. Scroll so tap point stays under finger.
+      requestAnimationFrame(() => {
+        lb.scrollLeft = offsetX * 2 - lb.clientWidth / 2;
+        lb.scrollTop = offsetY * 2 - lb.clientHeight / 2;
+      });
+    } else {
+      lb.scrollTo(0, 0);
+    }
   }
 });
 
@@ -3374,12 +3427,28 @@ async function renderCapture() {
 
   function renderNotebookPanel() {
     const volumeIn  = h('input', { class: 'input', placeholder: 'e.g. D or 4', style: { maxWidth: '120px' } });
-    const fileInput = h('input', { type: 'file', accept: 'image/*,application/pdf', capture: 'environment', style: { display: 'none' } });
+    // No `capture="environment"`: on Android Chrome it forces the camera and
+    // blocks picking existing photos from the library, which is the 90% flow
+    // (take photo with Files app → upload to Gloss later). Without capture,
+    // iOS/Android file pickers still offer "Take Photo" alongside the library.
+    // Broaden accept to tolerate mobile share-sheet uploads that arrive as
+    // application/octet-stream or with a HEIC/HEIF mime.
+    const fileInput = h('input', {
+      type: 'file',
+      accept: 'image/*,application/pdf,.pdf,.heic,.heif',
+      style: { display: 'none' },
+    });
     const drop = h('div', { class: 'drop-zone' },
       h('div', { class: 'big' }, 'Drop a scan here'),
-      h('div', { style: { marginTop: '6px', fontSize: '12px' } }, 'or ', h('span', { class: 'kbd' }, 'click'), ' to choose'),
+      h('div', { style: { marginTop: '6px', fontSize: '12px' } }, 'or ', h('span', { class: 'kbd' }, 'tap'), ' to choose'),
     );
-    const doIngest = f => startScanIngest(f, 'page', streamHost, { volume: volumeIn.value.trim() });
+    const doIngest = f => {
+      if (!f) { toast('No file selected', 'err'); return; }
+      // Surface a clearer error than "upload failed" when the file object is
+      // malformed (empty blob from a share-sheet race, 0-byte PDF, etc.).
+      if (f.size === 0) { toast('File is empty — try again', 'err'); return; }
+      startScanIngest(f, 'page', streamHost, { volume: volumeIn.value.trim() });
+    };
     drop.addEventListener('click', () => fileInput.click());
     drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
@@ -3750,7 +3819,13 @@ async function startScanIngest(file, kindHint, host, opts = {}) {
     if (kindHint && kindHint !== 'page') fd.append('kind', kindHint);
     if (opts.volume) fd.append('volume', opts.volume);
     const res = await fetch('/api/ingest/stream', { method: 'POST', body: fd });
-    if (!res.ok) throw new Error('upload failed');
+    if (!res.ok) {
+      // Surface HTTP status + server message — mobile uploads fail in ways
+      // ("upload failed") that are undiagnosable without this.
+      let body = '';
+      try { body = (await res.text()).slice(0, 200); } catch {}
+      throw new Error(`upload failed (${res.status})${body ? ': ' + body : ''}`);
+    }
     let total = 1, count = 0;
     for await (const evt of ndjson(res)) {
       if (evt.type === 'start') {
