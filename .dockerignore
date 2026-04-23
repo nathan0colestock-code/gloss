@@ -18,7 +18,11 @@ data
 .env.*
 
 # Local-only scripts and tests — one-shot seeds and Node test files don't ship.
+# Exception: scan-backup.sh is invoked by the server at runtime (setInterval
+# in server.js) to rclone /app/data/scans to R2 — that directory isn't
+# covered by Litestream, so the script MUST be in the image.
 scripts
+!scripts/scan-backup.sh
 tests
 
 # Docs (not executable)
