@@ -2,7 +2,7 @@
 'use strict';
 
 // One-shot script to ingest Andy Naselli's pastoral household-visit notes
-// into Foxed via the /api/ingest/voice endpoint.
+// into Gloss via the /api/ingest/voice endpoint.
 //
 // Usage:
 //   node scripts/ingest_household_visits.js --dry-run   # preview only

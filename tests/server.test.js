@@ -456,3 +456,18 @@ describe('POST /api/ingest guard (no file)', () => {
     assert.ok(res.status >= 400, `expected 4xx/5xx but got ${res.status}`);
   });
 });
+
+// ── Comms push health ─────────────────────────────────────────────────────
+
+describe('GET /api/comms/status', () => {
+  test('returns enabled flag and last-outcome fields', async () => {
+    const { status, body } = await get('/api/comms/status');
+    assert.equal(status, 200);
+    assert.equal(typeof body.enabled, 'boolean');
+    // these four fields are always present (null when never run)
+    assert.ok('last_attempted_at' in body);
+    assert.ok('last_success_at' in body);
+    assert.ok('last_error' in body);
+    assert.ok('last_outcome' in body);
+  });
+});

@@ -223,8 +223,38 @@ body.rail-collapsed .nav-btn .lbl { display: none; }
   padding: 8px 10px;
   text-transform: uppercase;
   transition: opacity 160ms;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 body.rail-collapsed #rail-footer { opacity: 0; }
+
+#comms-pill {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-transform: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  user-select: none;
+}
+#comms-pill:hover { background: var(--paper-3); color: var(--ink-soft); }
+#comms-pill.syncing { opacity: 0.6; pointer-events: none; }
+#comms-pill.shown { display: inline-flex; }
+#comms-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-faint);
+  flex-shrink: 0;
+}
+#comms-pill.ok      .dot { background: var(--ok); }
+#comms-pill.stale   .dot { background: #d97706; }
+#comms-pill.failed  .dot { background: var(--danger); }
 
 #theme-toggle {
   display: flex; align-items: center; gap: 12px;
@@ -1455,7 +1485,10 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
       <svg class="ico" id="theme-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <span class="lbl" id="theme-lbl">Dark mode</span>
     </button>
-    <div id="rail-footer">notebook · v1</div>
+    <div id="rail-footer">
+      <span>notebook · v1</span>
+      <button id="comms-pill" title="Click to push priority people to Comms now" type="button"><span class="dot"></span><span class="lbl">comms</span></button>
+    </div>
   </nav>
 
   <main id="main"><div id="main-inner"></div></main>
@@ -1583,6 +1616,66 @@ document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 document.getElementById('mobile-theme-btn')?.addEventListener('click', toggleTheme);
 document.getElementById('detail-back-btn')?.addEventListener('click', () => closeDetail());
 renderThemeBtn();
+
+// ── Comms push health pill ──────────────────────────────────────────────
+// Pulls /api/comms/status on a cadence. When push is disabled, the pill stays
+// hidden; when enabled, it shows "comms ✓" / "comms · 2h" / "comms · failed"
+// with a colored dot. Tooltip carries the detail.
+async function refreshCommsPill() {
+  const pill = document.getElementById('comms-pill');
+  if (!pill) return;
+  try {
+    const s = await fetch('/api/comms/status').then(r => r.ok ? r.json() : null);
+    if (!s || !s.enabled) { pill.classList.remove('shown'); return; }
+    pill.classList.add('shown');
+    pill.classList.remove('ok', 'stale', 'failed');
+
+    const lbl = pill.querySelector('.lbl');
+    const outcome = s.last_outcome;
+    if (outcome === 'ok') {
+      const ageMs = s.last_success_at ? Date.now() - new Date(s.last_success_at).getTime() : null;
+      const ageLabel = !ageMs ? 'ok'
+        : ageMs < 90 * 60 * 1000  ? 'ok'
+        : ageMs < 24 * 3600 * 1000 ? `${Math.round(ageMs / 3600_000)}h`
+                                   : `${Math.round(ageMs / 86400_000)}d`;
+      const stale = ageMs && ageMs > 60 * 60 * 1000;
+      pill.classList.add(stale ? 'stale' : 'ok');
+      lbl.textContent = `comms · ${ageLabel}`;
+      pill.title = `Comms push: last success ${s.last_success_at || '—'} (${s.last_count} contacts)`;
+    } else if (outcome === 'failed') {
+      pill.classList.add('failed');
+      lbl.textContent = 'comms · failed';
+      pill.title = `Comms push failed: ${s.last_error || 'unknown error'}`;
+    } else if (outcome === 'skipped') {
+      lbl.textContent = 'comms · idle';
+      pill.title = `Comms push skipped: ${s.last_skipped_reason || ''}`;
+    } else {
+      lbl.textContent = 'comms · …';
+      pill.title = 'Comms push not yet run';
+    }
+  } catch { /* silent */ }
+}
+refreshCommsPill();
+setInterval(refreshCommsPill, 60_000);
+
+// Click the pill → sync now (only when shown).
+document.getElementById('comms-pill')?.addEventListener('click', async () => {
+  const pill = document.getElementById('comms-pill');
+  if (!pill.classList.contains('shown')) return;
+  pill.classList.add('syncing');
+  pill.querySelector('.lbl').textContent = 'comms · syncing…';
+  try {
+    const r = await fetch('/api/comms/sync', { method: 'POST' }).then(x => x.json());
+    if (r.ok)              toast(`Comms: pushed ${r.pushed} contacts`, 'ok');
+    else if (r.skipped)    toast(`Comms: ${r.reason}`);
+    else                   toast(`Comms sync failed: ${r.error || 'unknown'}`, 'err');
+  } catch (e) {
+    toast('Comms sync failed: ' + e.message, 'err');
+  } finally {
+    pill.classList.remove('syncing');
+    refreshCommsPill();
+  }
+});
 
 function toast(msg, kind = '') {
   const t = h('div', { class: `toast ${kind}` }, msg);
