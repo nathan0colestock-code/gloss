@@ -3009,6 +3009,10 @@ function renderConnectionsPanel(panel, kind, node, conn) {
   if (kind === 'collection' || kind === 'artifact' || kind === 'person') {
     actionsRow.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
   }
+  if (kind === 'collection' || kind === 'artifact' || kind === 'reference') {
+    const convertBtn = buildActionBtn('Turn into…', () => convertEntityDetail(kind, node, convertBtn));
+    actionsRow.appendChild(convertBtn);
+  }
   panel.appendChild(actionsRow);
 
   // Metadata editors
@@ -3460,7 +3464,7 @@ async function mergeNode(kind, node) {
   } catch (err) { toast(err.message, 'err'); }
 }
 
-function convertEntityDetail(kind, node) {
+function convertEntityDetail(kind, node, anchorOverride) {
   const TARGETS = {
     artifact:   ['reference', 'collection'],
     reference:  ['artifact',  'collection'],
@@ -3469,7 +3473,8 @@ function convertEntityDetail(kind, node) {
   const targets = TARGETS[kind];
   if (!targets) return;
 
-  const anchorBtn = [...document.querySelectorAll('#detail button')].find(b => b.textContent.trim() === 'Convert to…');
+  const anchorBtn = anchorOverride
+    || [...document.querySelectorAll('#detail button')].find(b => b.textContent.trim() === 'Convert to…');
   const rect = anchorBtn ? anchorBtn.getBoundingClientRect() : { left: 200, bottom: 220 };
 
   const pop = h('div', { class: 'typeahead-pop', style: { minWidth: '160px' } });
