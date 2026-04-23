@@ -3464,15 +3464,39 @@ async function renderCapture() {
 
   // Notes — permanent section below the main input
   mainInner.appendChild(h('div', { style: { borderTop: '1px solid var(--rule)', margin: '28px 0 0' } }));
+  const newNoteBtn = h('button', { class: 'btn' }, '+ New note');
+  const addScanBtn = h('button', { class: 'btn' }, '+ Add scan');
+  const scanFileIn = h('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
   const notesHead = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '14px 0 6px' } },
     h('span', { class: 'lbl-mono', style: { fontSize: '11px', letterSpacing: '0.06em' } }, 'NOTES'),
-    h('button', { class: 'btn' }, '+ New note'),
+    h('div', { style: { display: 'flex', gap: '6px' } }, newNoteBtn, addScanBtn, scanFileIn),
   );
   const draftListEl = h('div', { class: 'md-draft-list' });
-  notesHead.querySelector('button').addEventListener('click', async () => {
+  newNoteBtn.addEventListener('click', async () => {
     const draft = await api('/api/markdown-drafts', 'POST', { content: '', date: todayIso() });
     await refreshDraftList(draftListEl, streamHost);
     openDraftDetail(draft.id, draftListEl, streamHost);
+  });
+  addScanBtn.addEventListener('click', () => scanFileIn.click());
+  scanFileIn.addEventListener('change', async () => {
+    const file = scanFileIn.files && scanFileIn.files[0];
+    if (!file) return;
+    addScanBtn.disabled = true; addScanBtn.textContent = 'Uploading…';
+    try {
+      const fd = new FormData();
+      fd.append('scan', file);
+      fd.append('date', todayIso());
+      const res = await fetch('/api/markdown-drafts/scan', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'upload failed');
+      const draft = await res.json();
+      await refreshDraftList(draftListEl, streamHost);
+      openDraftDetail(draft.id, draftListEl, streamHost);
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      addScanBtn.disabled = false; addScanBtn.textContent = '+ Add scan';
+      scanFileIn.value = '';
+    }
   });
   mainInner.append(notesHead, draftListEl);
   refreshDraftList(draftListEl, streamHost);
@@ -3579,17 +3603,32 @@ async function refreshDraftList(listEl, backlogHost) {
     return;
   }
   drafts.forEach(d => {
-    const lines = (d.content || '').split('\n').filter(l => l.trim());
-    const firstLine = lines[0] || '';
-    const title = firstLine.replace(/^#+\s*/, '').trim() || '(empty)';
-    const preview = lines.slice(1).join(' ').replace(/^[-*>]+\s*/gm, '').trim();
-    const tile = h('div', { class: 'day-tile draft-tile' },
-      h('div', { class: 'tile-body' },
+    const isScan = !!d.scan_path;
+    let body;
+    if (isScan) {
+      const caption = (d.content || '').trim();
+      const isPdf = d.scan_path.toLowerCase().endsWith('.pdf');
+      body = h('div', { class: 'tile-body', style: { display: 'flex', gap: '10px', alignItems: 'flex-start' } },
+        isPdf
+          ? h('div', { style: { width: '56px', height: '56px', flexShrink: 0, background: 'var(--paper-2)', border: '1px solid var(--rule)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--ink-4)' } }, 'PDF')
+          : h('img', { src: d.scan_path, style: { width: '56px', height: '56px', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--rule)' }, loading: 'lazy' }),
+        h('div', { style: { flex: '1', minWidth: 0 } },
+          h('div', { class: 'draft-tile-title' }, caption || '(scan · no caption)'),
+          h('div', { class: 'tile-meta' }, d.date + ' · scan · reference only'),
+        ),
+      );
+    } else {
+      const lines = (d.content || '').split('\n').filter(l => l.trim());
+      const firstLine = lines[0] || '';
+      const title = firstLine.replace(/^#+\s*/, '').trim() || '(empty)';
+      const preview = lines.slice(1).join(' ').replace(/^[-*>]+\s*/gm, '').trim();
+      body = h('div', { class: 'tile-body' },
         h('div', { class: 'draft-tile-title' }, title),
         preview ? h('div', { class: 'draft-tile-preview' }, preview) : null,
         h('div', { class: 'tile-meta' }, d.date + ' · draft'),
-      ),
-    );
+      );
+    }
+    const tile = h('div', { class: 'day-tile draft-tile' }, body);
     tile.addEventListener('click', () => openDraftDetail(d.id, listEl, backlogHost));
     listEl.appendChild(tile);
   });
@@ -3607,6 +3646,8 @@ function openDraftDetail(draftId, listEl, backlogHost) {
 
     detailInner.innerHTML = '';
     const body = h('div', { style: { padding: '20px 24px' } });
+
+    if (draft.scan_path) return openScanDraftDetail(draft, body, listEl, backlogHost);
 
     body.appendChild(h('div', { class: 'detail-label', style: { marginBottom: '14px' } }, 'Draft'));
 
@@ -3706,6 +3747,15 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       if (listEl) await refreshDraftList(listEl, backlogHost);
     });
 
+    const relatedHost = h('div', { style: { marginTop: '18px' } });
+    let relatedTimer;
+    const refreshRelated = () => {
+      clearTimeout(relatedTimer);
+      relatedTimer = setTimeout(() => renderDraftRelated(relatedHost, draft.id), 800);
+    };
+    ta.addEventListener('input', refreshRelated);
+    ta.addEventListener('blur', () => renderDraftRelated(relatedHost, draft.id));
+
     body.append(
       h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
       ta,
@@ -3713,10 +3763,124 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       fileModeBar,
       filingDetail,
       h('div', { class: 'draft-detail-actions' }, discardBtn, commitBtn),
+      relatedHost,
     );
     detailInner.appendChild(body);
+    if ((draft.content || '').trim()) renderDraftRelated(relatedHost, draft.id);
     setTimeout(() => ta.focus(), 50);
   });
+}
+
+// Scan drafts: reference-only. Show image + optional caption + inline related items.
+// No commit button — user deletes and re-uploads via Notebook tab if they want to ingest.
+function openScanDraftDetail(draft, body, listEl, backlogHost) {
+  body.appendChild(h('div', { class: 'detail-label', style: { marginBottom: '14px' } }, 'Scan reference'));
+
+  const isPdf = draft.scan_path.toLowerCase().endsWith('.pdf');
+  const preview = isPdf
+    ? h('div', { style: { padding: '24px', background: 'var(--paper-2)', border: '1px solid var(--rule)', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--ink-3)' } },
+        h('div', null, 'PDF'),
+        h('a', { href: draft.scan_path, target: '_blank', rel: 'noopener', style: { display: 'inline-block', marginTop: '6px', color: 'var(--accent)' } }, 'Open'))
+    : h('img', { src: draft.scan_path, style: { maxWidth: '100%', maxHeight: '420px', border: '1px solid var(--rule)', display: 'block', cursor: 'zoom-in' }, onclick: () => window.open(draft.scan_path, '_blank') });
+
+  const dateIn = h('input', { type: 'date', class: 'input', value: draft.date, style: { maxWidth: '180px' } });
+  const captionIn = h('textarea', {
+    class: 'input',
+    rows: 3,
+    placeholder: 'Caption (optional) — what is this scan about? Used to find related items.',
+    style: { fontFamily: 'var(--font-mono)', fontSize: '12.5px', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
+  });
+  captionIn.value = draft.content || '';
+
+  const relatedHost = h('div', { style: { marginTop: '18px' } });
+
+  let saveTimer, relatedTimer;
+  const save = () => api('/api/markdown-drafts/' + draft.id, 'PATCH', { content: captionIn.value, date: dateIn.value }).catch(() => {});
+  const refreshRelated = () => {
+    clearTimeout(relatedTimer);
+    relatedTimer = setTimeout(() => renderDraftRelated(relatedHost, draft.id), 800);
+  };
+  captionIn.addEventListener('input', () => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 600); refreshRelated(); });
+  captionIn.addEventListener('blur', async () => { await save(); renderDraftRelated(relatedHost, draft.id); });
+  dateIn.addEventListener('change', save);
+
+  const discardBtn = h('button', { class: 'btn' }, 'Delete');
+  discardBtn.addEventListener('click', async () => {
+    if (!confirm('Delete this scan reference?')) return;
+    await api('/api/markdown-drafts/' + draft.id, 'DELETE');
+    closeDetail();
+    if (listEl) await refreshDraftList(listEl, backlogHost);
+  });
+
+  body.append(
+    h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
+    preview,
+    captionIn,
+    h('div', { style: { fontSize: '11px', color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', marginTop: '8px' } }, 'Reference only — not ingested. Drop in the Notebook tab to parse it.'),
+    h('div', { class: 'draft-detail-actions' }, discardBtn),
+    relatedHost,
+  );
+  detailInner.appendChild(body);
+  renderDraftRelated(relatedHost, draft.id);
+}
+
+// Render an inline "Related in your notebook" section for a draft (scan or markdown).
+// The backend probes the draft's scan image and/or caption text via Gemini flash and
+// returns page / collection / people / scripture matches. Called on open, on blur, and
+// debounced on input — host is cleared & redrawn each pass.
+async function renderDraftRelated(host, draftId) {
+  host.innerHTML = '';
+  const zone = h('div', { class: 'ingest-stream' });
+  zone.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '6px' } }, 'RELATED'));
+  zone.appendChild(h('div', { style: { fontSize: '12px', color: 'var(--ink-4)' } }, 'Looking…'));
+  host.appendChild(zone);
+  try {
+    const data = await api('/api/markdown-drafts/' + draftId + '/related');
+    zone.innerHTML = '';
+    zone.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '8px' } }, 'RELATED'));
+    const { pages = [], collections = [], people = [], scripture = [] } = data;
+    const hasAnything = pages.length || collections.length || people.length || scripture.length;
+    if (!hasAnything) { zone.appendChild(h('div', { style: { fontSize: '12px', color: 'var(--ink-4)' } }, 'Nothing else found.')); return; }
+
+    if (collections.length > 0) {
+      zone.appendChild(h('div', { class: 'lbl-mono', style: { fontSize: '10px', margin: '0 0 4px' } }, 'COLLECTIONS'));
+      const list = h('div', { style: { marginBottom: '10px' } });
+      for (const c of collections) {
+        list.appendChild(h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 0', borderBottom: '1px solid var(--rule)' } },
+          h('span', { class: 'chip soft', style: { fontSize: '10px', flexShrink: 0 } }, c.kind || 'topical'),
+          h('span', { style: { fontSize: '12px', cursor: 'pointer', color: 'var(--accent)' }, onclick: `jumpToIndexNode('collection','${escAttr(c.id)}')` }, c.title),
+        ));
+      }
+      zone.appendChild(list);
+    }
+
+    if (pages.length > 0) {
+      zone.appendChild(h('div', { class: 'lbl-mono', style: { fontSize: '10px', margin: '0 0 4px' } }, 'PAGES'));
+      const list = h('div', { style: { marginBottom: '10px' } });
+      for (const p of pages) {
+        const cite = (p.volume && p.page_number) ? `v.${p.volume} p.${p.page_number}` : '';
+        const date = p.daily_log_date || (p.captured_at ? p.captured_at.slice(0, 10) : '');
+        const meta = [cite, date, p.collection_titles].filter(Boolean).join(' · ');
+        list.appendChild(h('div', { style: { padding: '4px 0', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }, onclick: `openPageDetail('${escAttr(p.id)}')` },
+          h('div', { style: { fontSize: '12px', color: 'var(--ink-2)' } }, p.summary || '(no summary)'),
+          meta ? h('div', { style: { fontSize: '10px', color: 'var(--ink-4)', marginTop: '2px', fontFamily: 'var(--font-mono)' } }, meta) : null,
+        ));
+      }
+      zone.appendChild(list);
+    }
+
+    const entityBits = [];
+    for (const p of people) entityBits.push(h('span', { style: { fontSize: '12px', cursor: 'pointer', color: 'var(--accent)' }, onclick: `jumpToIndexNode('person','${escAttr(p.id)}')` }, `${p.label} (${p.page_count}p)`));
+    for (const s of scripture) entityBits.push(h('span', { style: { fontSize: '12px', cursor: 'pointer', color: 'var(--accent)' }, onclick: `jumpToIndexNode('scripture','${escAttr(s.id)}')` }, `${s.canonical} (${s.page_count}p)`));
+    if (entityBits.length > 0) {
+      zone.appendChild(h('div', { class: 'lbl-mono', style: { fontSize: '10px', margin: '0 0 4px' } }, 'PEOPLE & SCRIPTURE'));
+      zone.appendChild(h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px' } }, ...entityBits));
+    }
+  } catch (err) {
+    zone.innerHTML = '';
+    zone.appendChild(h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'RELATED'));
+    zone.appendChild(h('div', { style: { fontSize: '12px', color: 'var(--ink-4)' } }, err.message));
+  }
 }
 
 async function startScanIngest(file, kindHint, host, opts = {}) {

@@ -1104,8 +1104,57 @@ Return JSON:
   }
 }
 
+// Quick lookup probe: extract search signals from a scan or text fragment so
+// the caller can find related content already in the system without ingesting.
+async function extractSearchHints(imagePath, text) {
+  const prompt = `You are helping look up entries in a personal notebook database.
+${imagePath ? 'Examine this notebook image.' : 'Read this text.'}
+Extract signals to find related existing notebook content.
+
+Return ONLY valid JSON (no markdown fences):
+{
+  "terms": ["<3-8 key phrases or nouns — topics, themes, activities, places>"],
+  "people": ["<full names of people mentioned, as written>"],
+  "scripture": ["<Bible references as 'Book chapter:verse', e.g. 'John 3:16', 'Nehemiah 6:1-8'>"],
+  "dates": ["<any specific dates visible, in YYYY-MM-DD format if possible>"]
+}
+Keep terms short (1-3 words each). Omit filler words. Prefer nouns and proper nouns.`;
+
+  try {
+    const parts = [];
+    if (imagePath) {
+      const imageData = fs.readFileSync(imagePath);
+      const base64 = imageData.toString('base64');
+      const ext = imagePath.split('.').pop().toLowerCase();
+      const mediaTypeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+      const mimeType = mediaTypeMap[ext] || 'image/jpeg';
+      parts.push({ inlineData: { mimeType, data: base64 } });
+    }
+    parts.push({ text: text ? `Content:\n${text}\n\n${prompt}` : prompt });
+
+    const response = await genai.models.generateContent({
+      model: CHAT_MODEL,
+      contents: [{ role: 'user', parts }],
+      config: { responseMimeType: 'application/json', temperature: 0.1, maxOutputTokens: 512 },
+    });
+    const raw = (response.text || '').trim();
+    if (!raw) return { terms: [], people: [], scripture: [], dates: [] };
+    const json = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
+    const parsed = JSON.parse(json);
+    return {
+      terms: Array.isArray(parsed.terms) ? parsed.terms : [],
+      people: Array.isArray(parsed.people) ? parsed.people : [],
+      scripture: Array.isArray(parsed.scripture) ? parsed.scripture : [],
+      dates: Array.isArray(parsed.dates) ? parsed.dates : [],
+    };
+  } catch (err) {
+    console.warn('extractSearchHints failed:', err.message);
+    return { terms: [], people: [], scripture: [], dates: [] };
+  }
+}
+
 module.exports = {
   parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
-  classifyRowForCrossKind, generateTopicalIndexEntries,
+  classifyRowForCrossKind, generateTopicalIndexEntries, extractSearchHints,
 };

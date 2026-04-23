@@ -208,6 +208,13 @@ db.exec(`
   if (!cols.includes('answer_format')) db.exec('ALTER TABLE backlog_items ADD COLUMN answer_format TEXT');
   if (!cols.includes('answer_options')) db.exec('ALTER TABLE backlog_items ADD COLUMN answer_options TEXT');
 }
+// Markdown drafts can also hold scans. A draft with scan_path is a photo/PDF
+// that the user wants to reference (see how it'd link to the system) without
+// committing it into the notebook.
+{
+  const cols = db.pragma('table_info(markdown_drafts)').map(c => c.name);
+  if (!cols.includes('scan_path')) db.exec('ALTER TABLE markdown_drafts ADD COLUMN scan_path TEXT');
+}
 // Items: status for bullet-journal arrow semantics (open|done|migrated|scheduled|cancelled|note).
 // Default is NULL — existing rows don't get retrofilled; new parses populate it.
 {
@@ -5542,6 +5549,75 @@ function getHomePayload() {
   };
 }
 
+// Pre-ingest lookup: given hints extracted from a scan or text, return pages,
+// collections, people, scripture, and daily-log already in the system that
+// relate to that content. Non-destructive — nothing is saved.
+function findRelated({ terms = [], people = [], scripture = [], dates = [] } = {}) {
+  const result = { pages: [], collections: [], people: [], scripture: [], daily_log: null };
+
+  if (terms.length > 0) {
+    const q = terms.map(t => t.replace(/['"*]/g, ' ').trim()).filter(Boolean).join(' ');
+    try {
+      const items = searchItems(q, 20);
+      const seenPages = new Set();
+      for (const item of items) {
+        if (!seenPages.has(item.page_id)) seenPages.add(item.page_id);
+      }
+      if (seenPages.size > 0) {
+        const pageIds = [...seenPages];
+        const ph = pageIds.map(() => '?').join(',');
+        result.pages = db.prepare(`
+          SELECT p.id, p.volume, p.page_number, p.summary, p.captured_at, p.source_kind,
+                 (SELECT GROUP_CONCAT(c.title, ' · ')
+                  FROM links lc JOIN collections c ON c.id = lc.to_id
+                  WHERE lc.from_type='page' AND lc.from_id=p.id AND lc.to_type='collection'
+                  LIMIT 3) AS collection_titles,
+                 (SELECT dl.date FROM links ll JOIN daily_logs dl ON dl.id = ll.to_id
+                  WHERE ll.from_type='page' AND ll.from_id=p.id AND ll.to_type='daily_log'
+                  AND dl.archived_at IS NULL LIMIT 1) AS daily_log_date
+          FROM pages p WHERE p.id IN (${ph}) ORDER BY p.captured_at DESC
+        `).all(...pageIds);
+        result.collections = db.prepare(`
+          SELECT DISTINCT c.id, c.kind, c.title
+          FROM links l JOIN collections c ON c.id = l.to_id
+          WHERE l.from_type='page' AND l.to_type='collection'
+            AND l.from_id IN (${ph}) AND c.archived_at IS NULL
+          ORDER BY c.title COLLATE NOCASE LIMIT 10
+        `).all(...pageIds);
+      }
+    } catch (_) { /* FTS might fail on unusual chars — non-fatal */ }
+  }
+
+  for (const name of people) {
+    const n = name.replace(/['"*]/g, ' ').trim();
+    if (!n) continue;
+    const p = db.prepare(`SELECT id, label FROM people WHERE label = ? COLLATE NOCASE`).get(n)
+      || db.prepare(`SELECT id, label FROM people WHERE label LIKE ? COLLATE NOCASE LIMIT 1`).get(n + '%');
+    if (p && !result.people.find(x => x.id === p.id)) {
+      const cnt = db.prepare(`SELECT COUNT(DISTINCT from_id) as c FROM links WHERE to_type='person' AND to_id=? AND from_type='page'`).get(p.id);
+      result.people.push({ id: p.id, label: p.label, page_count: cnt?.c || 0 });
+    }
+  }
+
+  for (const ref of scripture) {
+    const r = ref.replace(/['"*]/g, ' ').trim();
+    if (!r) continue;
+    const s = db.prepare(`SELECT id, canonical FROM scripture_refs WHERE canonical LIKE ? COLLATE NOCASE LIMIT 1`).get(r + '%');
+    if (s && !result.scripture.find(x => x.id === s.id)) {
+      const cnt = db.prepare(`SELECT COUNT(DISTINCT from_id) as c FROM links WHERE to_type='scripture' AND to_id=? AND from_type='page'`).get(s.id);
+      result.scripture.push({ id: s.id, canonical: s.canonical, page_count: cnt?.c || 0 });
+    }
+  }
+
+  for (const date of dates) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const dl = db.prepare(`SELECT id, date FROM daily_logs WHERE date = ?`).get(date);
+    if (dl) { result.daily_log = dl; break; }
+  }
+
+  return result;
+}
+
 module.exports = {
   insertPage, getPage, getRecentPages, applyThreadingForPage, findPageByVolumeAndNumber,
   findPendingPageRefProposals,
@@ -5633,11 +5709,12 @@ module.exports = {
   getCrossKindContent, refreshContentHash, markLinksClassified, listCrossKindCandidates,
   // Markdown drafts
   createMarkdownDraft, listMarkdownDrafts, getMarkdownDraft, updateMarkdownDraft, deleteMarkdownDraft,
+  findRelated,
 };
 
 // ─── Markdown drafts ────────────────────────────────────────────────────────
-function createMarkdownDraft({ id, content = '', date }) {
-  db.prepare(`INSERT INTO markdown_drafts(id, content, date, created_at) VALUES (?, ?, ?, datetime('now'))`).run(id, content, date);
+function createMarkdownDraft({ id, content = '', date, scan_path = null }) {
+  db.prepare(`INSERT INTO markdown_drafts(id, content, date, scan_path, created_at) VALUES (?, ?, ?, ?, datetime('now'))`).run(id, content, date, scan_path);
   return db.prepare('SELECT * FROM markdown_drafts WHERE id = ?').get(id);
 }
 

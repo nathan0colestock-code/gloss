@@ -24,7 +24,7 @@ const execFileAsync = promisify(execFile);
 const db = require('./db');
 const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
-        classifyRowForCrossKind, generateTopicalIndexEntries } = require('./ai');
+        classifyRowForCrossKind, generateTopicalIndexEntries, extractSearchHints } = require('./ai');
 const google = require('./google');
 const comms = require('./comms');
 
@@ -274,9 +274,20 @@ function parseAuthCookie(req) {
   }
   return null;
 }
+function requireApiKey(req) {
+  const key = process.env.API_KEY;
+  if (!key) return false;
+  const auth = req.headers['authorization'];
+  const provided = (auth?.startsWith('Bearer ') ? auth.slice(7) : null) ?? req.headers['x-api-key'];
+  if (!provided) return false;
+  const a = Buffer.from(String(provided));
+  const b = Buffer.from(key);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 function requireAuth(req, res, next) {
   if (!AUTH_ENABLED) return next();
   if (AUTH_BYPASS.has(req.path)) return next();
+  if (req.path.startsWith('/api/') && requireApiKey(req)) return next();
   if (verifyCookie(parseAuthCookie(req))) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'auth required' });
   return res.redirect('/login');
@@ -705,10 +716,49 @@ app.post('/api/markdown-drafts', (req, res) => {
   res.json(draft);
 });
 
+// Scan drafts: a draft with scan_path is a photo/PDF the user wants to reference
+// (see how it'd link to the system) without committing it into the notebook.
+app.post('/api/markdown-drafts/scan', upload.single('scan'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file provided' });
+  const { date, content = '' } = req.body || {};
+  const isoDate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    ? date
+    : new Date().toISOString().slice(0, 10);
+  const scanPath = `/scans/${req.file.filename}`;
+  const draft = db.createMarkdownDraft({
+    id: crypto.randomUUID(),
+    content,
+    date: isoDate,
+    scan_path: scanPath,
+  });
+  res.json(draft);
+});
+
 app.get('/api/markdown-drafts/:id', (req, res) => {
   const draft = db.getMarkdownDraft(req.params.id);
   if (!draft) return res.status(404).json({ error: 'not found' });
   res.json(draft);
+});
+
+app.get('/api/markdown-drafts/:id/related', async (req, res) => {
+  const draft = db.getMarkdownDraft(req.params.id);
+  if (!draft) return res.status(404).json({ error: 'not found' });
+  try {
+    let imagePath = null;
+    if (draft.scan_path && draft.scan_path.startsWith('/scans/')) {
+      const filename = draft.scan_path.slice('/scans/'.length);
+      const candidate = path.join(SCANS_DIR, filename);
+      if (fs.existsSync(candidate)) imagePath = candidate;
+    }
+    const text = (draft.content || '').trim() || null;
+    if (!imagePath && !text) return res.json({ hints: {}, pages: [], collections: [], people: [], scripture: [], daily_logs: [] });
+    const hints = await extractSearchHints(imagePath, text);
+    const related = db.findRelated(hints);
+    res.json({ hints, ...related });
+  } catch (e) {
+    console.error('markdown draft related failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.patch('/api/markdown-drafts/:id', (req, res) => {
@@ -719,6 +769,12 @@ app.patch('/api/markdown-drafts/:id', (req, res) => {
 });
 
 app.delete('/api/markdown-drafts/:id', (req, res) => {
+  const draft = db.getMarkdownDraft(req.params.id);
+  if (draft && draft.scan_path && draft.scan_path.startsWith('/scans/')) {
+    const filename = draft.scan_path.slice('/scans/'.length);
+    const candidate = path.join(SCANS_DIR, filename);
+    fs.unlink(candidate, () => {});
+  }
   db.deleteMarkdownDraft(req.params.id);
   res.json({ ok: true });
 });
@@ -726,6 +782,7 @@ app.delete('/api/markdown-drafts/:id', (req, res) => {
 app.post('/api/markdown-drafts/:id/commit', async (req, res) => {
   const draft = db.getMarkdownDraft(req.params.id);
   if (!draft) return res.status(404).json({ error: 'not found' });
+  if (draft.scan_path) return res.status(400).json({ error: 'Scan drafts are reference-only. Delete and re-upload via the Notebook tab to ingest.' });
   const trimmed = draft.content.trim();
   if (!trimmed) return res.status(400).json({ error: 'draft is empty' });
   const collectionId = (req.body && req.body.collection_id) || null;

@@ -95,15 +95,60 @@ function buildContactsPayload() {
 
 // POST the payload. Returns { ok, saved, errors } from Comms, or throws.
 async function pushContactsToComms(contacts) {
+  return postToComms('/api/gloss/contacts', { contacts });
+}
+
+// Build notes payload: one row per (page, person) mention for every priority
+// person. Each note carries a stable id so Comms upsert dedups across pushes.
+// Content is the role_summary (pointer summary) or page summary — never raw
+// item text, per Gloss' pointer-summary invariant.
+function buildNotesPayload() {
+  const origin = publicOrigin();
+  const people = db.listPeople();
+  const notes = [];
+
+  for (const p of people) {
+    if ((p.priority ?? 0) < 1) continue;
+
+    const topicalCollections = (p.collections || [])
+      .filter(c => c && c.title && (!c.kind || c.kind === 'topical'));
+    const fallbackCollection = topicalCollections[0]?.title || null;
+
+    for (const pg of (p.pages || [])) {
+      const mentions = Array.isArray(pg.person_mentions) ? pg.person_mentions.filter(Boolean) : [];
+      const noteText = mentions[0] || pg.summary || null;
+      if (!noteText) continue;
+      const date = pg.daily_log_date || (pg.captured_at ? pg.captured_at.slice(0, 10) : null);
+      if (!date) continue;
+
+      notes.push({
+        id: `page:${pg.id}:${p.id}`,
+        contact: p.label,
+        date,
+        note: noteText,
+        collection: fallbackCollection,
+        gloss_url: `${origin}/#/page/${pg.id}`,
+      });
+    }
+  }
+
+  return notes;
+}
+
+async function pushNotesToComms(notes) {
+  return postToComms('/api/gloss/notes', { notes });
+}
+
+async function postToComms(path, payload) {
   if (!isEnabled()) throw new Error(`comms push disabled: ${disabledReason()}`);
-  const url = `${commsUrl()}/api/gloss/contacts`;
+  const url = `${commsUrl()}${path}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${commsKey()}`,
     },
-    body: JSON.stringify({ contacts }),
+    body: JSON.stringify(payload),
   });
   const text = await res.text();
   let body = null;
@@ -117,24 +162,38 @@ async function pushContactsToComms(contacts) {
   return body;
 }
 
-// Convenience: build + push in one shot. Best-effort — swallows errors into
-// the return value so the interval loop never crashes the server.
+// Convenience: build + push contacts AND notes in one shot. Best-effort —
+// swallows errors per-side so the interval loop never crashes the server.
 async function syncContactsToComms() {
   if (!isEnabled()) return { skipped: true, reason: disabledReason() };
   const contacts = buildContactsPayload();
+  const notes    = buildNotesPayload();
   if (contacts.length === 0) return { skipped: true, reason: 'no priority people' };
+
+  const out = { ok: true, pushed: contacts.length, notes_pushed: notes.length };
   try {
-    const result = await pushContactsToComms(contacts);
-    return { ok: true, pushed: contacts.length, result };
+    out.contacts_result = await pushContactsToComms(contacts);
   } catch (e) {
-    return { ok: false, pushed: contacts.length, error: e.message };
+    out.ok = false;
+    out.error = e.message;
   }
+  if (notes.length) {
+    try {
+      out.notes_result = await pushNotesToComms(notes);
+    } catch (e) {
+      out.ok = false;
+      out.notes_error = e.message;
+    }
+  }
+  return out;
 }
 
 module.exports = {
   isEnabled,
   disabledReason,
   buildContactsPayload,
+  buildNotesPayload,
   pushContactsToComms,
+  pushNotesToComms,
   syncContactsToComms,
 };
