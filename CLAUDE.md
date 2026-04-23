@@ -1,4 +1,4 @@
-# CLAUDE.md — Foxed
+# CLAUDE.md — Gloss
 
 ## For agents working in parallel
 
@@ -138,7 +138,7 @@ Purpose: user-curated cross-cuts. Each user_index has an optional `query` string
 Invariant: `user_indexes.title UNIQUE COLLATE NOCASE`. Deleting a user_index first deletes its `index_entries`. A manual entry can have `page_id` or `item_id` or both null-ish; tolerate all three.
 
 ### Refine (free-form hint → reexamine)
-Purpose: the user tells Foxed something Gemini missed (e.g. "J— is Jake Thompson" or "this page is about sabbath not productivity"). `reexaminePageInBackground` re-runs Gemini over the scan with that hint + current known entities, applies rename/replace/summary revisions, and links any newly-confident entities. Triggered on two paths: explicit `/api/pages/:id/refine`, and when a backlog question is answered.
+Purpose: the user tells Gloss something Gemini missed (e.g. "J— is Jake Thompson" or "this page is about sabbath not productivity"). `reexaminePageInBackground` re-runs Gemini over the scan with that hint + current known entities, applies rename/replace/summary revisions, and links any newly-confident entities. Triggered on two paths: explicit `/api/pages/:id/refine`, and when a backlog question is answered.
 Invariant: reexamine is best-effort and must never throw to the caller — internal try/catch wraps everything. The `newlyConfirmed` argument is either `{kind:'hint', label:<string>}` (free-form) or `{kind:'person'|'scripture'|'topic', label:<string>}` (augment).
 
 ### Chat (`/api/chat`)
