@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3747,
       "autoPort": false
+    },
+    {
+      "name": "comms",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/nathancolestock/comms/server.js"],
+      "port": 3748,
+      "autoPort": false
     }
   ]
 }
