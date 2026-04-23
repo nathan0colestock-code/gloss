@@ -3336,12 +3336,20 @@ async function renderCapture() {
 
   const googleToggleBtn = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 9px', flexShrink: 0 } },
     googleOpen ? '⚙ Google ▲' : '⚙ Google');
+  // Standalone page: opens in a new tab so the user can keep the notebook
+  // they're working from in the main tab and the briefing in a second tab
+  // for printing.
+  const briefingBtn = h('a', {
+    href: '/research.html', target: '_blank', rel: 'noopener',
+    class: 'btn ghost', style: { fontSize: '12px', padding: '3px 9px', flexShrink: 0, marginRight: '8px', textDecoration: 'none' },
+    title: 'Pull a research briefing from gloss + comms + black',
+  }, '✎ Briefing');
   mainInner.appendChild(h('div', { class: 'surface-head', style: { alignItems: 'flex-start' } },
     h('div', null,
       h('h1', { class: 'surface-title' }, 'Capture'),
-      
+
     ),
-    googleToggleBtn,
+    h('div', { style: { display: 'flex', alignItems: 'center' } }, briefingBtn, googleToggleBtn),
   ));
 
   const typeLabels = ['Notebook', 'Artifact', 'Reference'];
