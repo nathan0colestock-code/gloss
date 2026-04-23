@@ -394,6 +394,12 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS ux_user_indexes_title    ON user_indexes(title COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS ix_links_to                     ON links(to_type, to_id);
   CREATE INDEX IF NOT EXISTS ix_links_from                   ON links(from_type, from_id);
+  -- Speeds up the /api/index/tree recursive page-count CTE, which scans
+  -- links.from_type='page' joined by (to_type, to_id) at every recursion step.
+  -- A covering (from_type, to_type, to_id, from_id) index lets SQLite satisfy
+  -- both filter predicates and the DISTINCT from_id aggregation from the index
+  -- alone without reading the row.
+  CREATE INDEX IF NOT EXISTS ix_links_from_to_covering       ON links(from_type, to_type, to_id, from_id);
   CREATE INDEX IF NOT EXISTS ix_backlog_status               ON backlog_items(status);
   CREATE INDEX IF NOT EXISTS ix_backlog_context_page         ON backlog_items(context_page_id);
   CREATE INDEX IF NOT EXISTS ix_pages_volume_page            ON pages(volume, page_number);
@@ -961,17 +967,24 @@ function listIndexTree({ includeArchived = false } = {}) {
     reference: 'References', person: 'People', topic: 'Topics',
     scripture: 'Scripture', user_index: 'My Indexes',
   };
+  // Bucket every row already preloaded into ctx.rowMap by kind, splitting
+  // active/archived. This replaces the 18 per-kind SELECT id FROM <table>
+  // queries the old implementation issued (9 kinds × active+archived) with
+  // zero extra queries — rowMap already has every row + archived_at we need.
+  const buckets = new Map(); // kind → { active: [row], archived: [row] }
+  for (const kind of ALL_INDEX_KINDS) buckets.set(kind, { active: [], archived: [] });
+  for (const [key, row] of ctx.rowMap) {
+    const colon = key.indexOf(':');
+    const kind = key.slice(0, colon);
+    const bucket = buckets.get(kind);
+    if (!bucket) continue;
+    (row.archived_at ? bucket.archived : bucket.active).push(row);
+  }
+  const byLabel = (a, b) => String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
   for (const kind of ALL_INDEX_KINDS) {
-    const spec = _indexKindSpec(kind);
-    const whereActive   = `${spec.archiveCol} IS NULL`;
-    const whereArchived = `${spec.archiveCol} IS NOT NULL`;
-    const kindFilter    = spec.kindFilter ? `AND ${spec.kindFilter}` : '';
-    const activeRows = db.prepare(
-      `SELECT id FROM ${spec.table} WHERE ${whereActive} ${kindFilter} ORDER BY ${spec.labelCol} COLLATE NOCASE`
-    ).all();
-    const archivedRows = includeArchived
-      ? db.prepare(`SELECT id FROM ${spec.table} WHERE ${whereArchived} ${kindFilter} ORDER BY ${spec.labelCol} COLLATE NOCASE`).all()
-      : [];
+    const { active, archived } = buckets.get(kind);
+    active.sort(byLabel);
+    if (includeArchived) archived.sort(byLabel);
     // Top-level rows: nodes with no same-kind parent (cross-kind parents are OK —
     // a topic under a user_index still appears at the top of the Topics section).
     const filterTopLevel = (rows) => rows.filter(r => !ctx.hasParentInSameKind.has(`${kind}:${r.id}`));
@@ -979,8 +992,10 @@ function listIndexTree({ includeArchived = false } = {}) {
     kinds.push({
       kind,
       label: KIND_LABELS[kind] || kind,
-      active:   filterTopLevel(activeRows).map(r => _buildIndexRow(kind, r.id, { seen, ctx })).filter(Boolean),
-      archived: filterTopLevel(archivedRows).map(r => _buildIndexRow(kind, r.id, { seen: new Set(), ctx })).filter(Boolean),
+      active:   filterTopLevel(active).map(r => _buildIndexRow(kind, r.id, { seen, ctx })).filter(Boolean),
+      archived: includeArchived
+        ? filterTopLevel(archived).map(r => _buildIndexRow(kind, r.id, { seen: new Set(), ctx })).filter(Boolean)
+        : [],
     });
   }
   return { kinds };

@@ -4010,6 +4010,7 @@ app.delete('/api/user-indexes/:indexId/entries/:entryId', (req, res) => {
 // The old per-kind rename/merge/archive endpoints stay as deprecation shims.
 
 app.get('/api/index/tree', (req, res) => {
+  console.time('index-load');
   try {
     const includeArchived = req.query.archived === 'all';
     const tree = db.listIndexTree({ includeArchived });
@@ -4017,6 +4018,8 @@ app.get('/api/index/tree', (req, res) => {
   } catch (err) {
     console.error('index tree failed:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    console.timeEnd('index-load');
   }
 });
 
