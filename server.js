@@ -24,7 +24,8 @@ const execFileAsync = promisify(execFile);
 const db = require('./db');
 const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
-        classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio } = require('./ai');
+        classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
+        parseVoiceMemoStream, parseMarkdownPageStream } = require('./ai');
 const google = require('./google');
 const comms = require('./comms');
 
@@ -802,6 +803,53 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
   const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
     ? date
     : new Date().toISOString().slice(0, 10);
+
+  // Opt-in NDJSON streaming path — emits start → transcript → delta* → done.
+  // Falls back to a single final 'done' frame if the streaming parse fails.
+  const wantsStream = /x-ndjson/i.test(req.get('accept') || '');
+  if (wantsStream) {
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    const emit = (obj) => { try { res.write(JSON.stringify(obj) + '\n'); } catch {} };
+    emit({ type: 'start' });
+    try {
+      const transcript = await transcribeAudio(req.file.path, req.file.mimetype);
+      if (!transcript || !transcript.trim()) {
+        emit({ type: 'error', error: 'Transcription returned empty text', fatal: true });
+        res.end(); return;
+      }
+      emit({ type: 'transcript', transcript });
+      let finalParsed = null;
+      try {
+        for await (const frame of parseVoiceMemoStream(
+          transcript.trim(),
+          db.getRecentAnsweredQuestions(150),
+          db.getKnownAliases(),
+          db.getGlossary(),
+        )) {
+          if (frame.type === 'delta') emit(frame);
+          else if (frame.type === 'final') finalParsed = frame.parsed;
+        }
+      } catch (streamErr) {
+        console.warn('voice-audio stream parse failed, falling back:', streamErr.message);
+      }
+      if (!finalParsed) {
+        finalParsed = await parseVoiceMemo(
+          transcript.trim(),
+          db.getRecentAnsweredQuestions(150),
+          db.getKnownAliases(),
+          db.getGlossary(),
+        );
+      }
+      const saved = _saveVoiceAudioPage(finalParsed, transcript.trim(), isoDate, req.file);
+      emit({ type: 'done', ...saved });
+    } catch (err) {
+      console.error('voice-audio stream ingest failed:', err);
+      emit({ type: 'error', error: err.message, fatal: true });
+    }
+    res.end();
+    return;
+  }
+
   try {
     const transcript = await transcribeAudio(req.file.path, req.file.mimetype);
     if (!transcript || !transcript.trim()) {
@@ -895,6 +943,84 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
     res.status(500).json({ error: 'Voice-audio ingest failed', detail: err.message });
   }
 });
+
+// Save a parsed voice-audio memo to the DB. Mirrors the inline save block in
+// the non-streaming branch of /api/ingest/voice-audio so the streaming
+// variant can reuse the same pipeline (insert page → items → link entities →
+// backlog → daily log → fire classifier). Returns the JSON shape the
+// non-streaming path emits as its response body.
+function _saveVoiceAudioPage(parsed, transcript, isoDate, file) {
+  const pageId = crypto.randomUUID();
+  db.insertPage({
+    id: pageId,
+    scan_path: `voice:${pageId}`,
+    raw_ocr_text: transcript,
+    summary: parsed.summary || null,
+    source_kind: 'voice_memo',
+    captured_at: `${isoDate}T12:00:00`,
+  });
+  const itemRows = (parsed.items || []).map(item => ({
+    id: crypto.randomUUID(),
+    page_id: pageId,
+    kind: item.kind,
+    text: item.text,
+    confidence: item.confidence ?? 1.0,
+  }));
+  if (itemRows.length) db.insertItems(itemRows);
+  for (const entity of (parsed.entities || [])) {
+    try {
+      const roleSummary = (entity.role_summary || '').trim() || null;
+      if (entity.kind === 'scripture' && entity.book && entity.chapter) {
+        const ref = db.upsertScriptureRef({
+          canonical: entity.label, book: entity.book, chapter: entity.chapter,
+          verse_start: entity.verse_start ?? null, verse_end: entity.verse_end ?? null,
+        });
+        db.linkPageToScripture(pageId, ref.id, 1.0, roleSummary);
+      } else if (entity.kind === 'household' && entity.label) {
+        const h = db.findHouseholdByMention(entity.label) || db.upsertHouseholdByName(entity.label);
+        if (h) db.linkPageToHousehold(pageId, h.id, entity.confidence ?? 0.9, roleSummary);
+      } else if (entity.kind === 'person' && entity.label) {
+        const p = db.upsertPerson({ label: entity.label });
+        db.linkPageToPerson(pageId, p.id, 1.0, roleSummary);
+      } else if (entity.kind === 'topic' && entity.label) {
+        const id = crypto.randomUUID();
+        db.upsertEntity({ id, kind: 'topic', label: entity.label });
+        const t = db.getEntityByKindLabel('topic', entity.label);
+        if (t) db.insertLink({
+          id: crypto.randomUUID(),
+          from_type: 'page', from_id: pageId, to_type: 'topic', to_id: t.id,
+          created_by: 'foxed-voice-audio', confidence: 0.9,
+          role_summary: roleSummary,
+        });
+      }
+    } catch (e) { console.warn('voice-audio entity skip:', e.message); }
+  }
+  const backlogRows = (parsed.backlog_items || []).map(b => ({
+    id: crypto.randomUUID(),
+    kind: b.kind,
+    subject: b.subject,
+    proposal: b.proposal,
+    context_page_id: pageId,
+    answer_format: b.kind === 'question' ? (b.answer_format || 'short') : null,
+    answer_options: b.kind === 'question' && b.answer_format === 'choice' ? b.options : null,
+  }));
+  if (backlogRows.length) db.insertBacklogItems(backlogRows);
+  let dl = db.findDailyLogByDate(isoDate);
+  if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: isoDate });
+  db.linkPageToDailyLog(pageId, dl.id, 1.0);
+  setImmediate(() => classifyPageForIndexesInBackground(pageId));
+  return {
+    ok: true,
+    page_id: pageId,
+    date: isoDate,
+    summary: parsed.summary,
+    transcript,
+    items_count: itemRows.length,
+    backlog_count: backlogRows.length,
+    daily_log: { id: dl.id, date: isoDate },
+    audio_path: file ? `/voice-memos/${path.basename(file.path)}` : null,
+  };
+}
 
 // Markdown drafts — saved locally, not yet committed through the AI pipeline.
 // Creating or updating a draft is instant (no Gemini call). Committing triggers
@@ -995,62 +1121,102 @@ app.post('/api/ingest/markdown', async (req, res) => {
   const isoDate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
     ? date
     : new Date().toISOString().slice(0, 10);
+
+  // Opt-in streaming path. When the client requests NDJSON, we stream delta
+  // frames (partial entities/items) as Gemini emits them, then a final frame
+  // with the saved-page summary. If anything in the stream fails, fall back
+  // to the non-streaming path so the user still gets their save.
+  const wantsStream = /x-ndjson/i.test(req.get('accept') || '');
+  if (wantsStream) {
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    const emit = (obj) => {
+      try { res.write(JSON.stringify(obj) + '\n'); } catch {}
+    };
+    emit({ type: 'start' });
+    try {
+      const recentAnswered = db.getRecentAnsweredQuestions(150);
+      const knownAliases = db.getKnownAliases();
+      const notebookGlossary = db.getGlossary();
+      const priorContext = buildPriorContext(db.getRecentPagesForContext(null, null, 5));
+      let finalParsed = null;
+      for await (const frame of parseMarkdownPageStream(trimmed, {
+        recentAnsweredQuestions: recentAnswered, knownAliases, notebookGlossary, priorContext,
+        userDate: isoDate, userTitle: (title && String(title).trim()) || null,
+      })) {
+        if (frame.type === 'delta') emit(frame);
+        else if (frame.type === 'final') finalParsed = frame.parsed;
+      }
+      if (!finalParsed) throw new Error('stream ended without final frame');
+      const saved = _saveMarkdownPage(finalParsed, trimmed, isoDate);
+      emit({ type: 'done', ...saved });
+    } catch (err) {
+      console.warn('markdown stream ingest failed, falling back:', err.message);
+      // Non-streaming fallback within the same response — the client's ndjson
+      // iterator will see {type:'error'} then the same shape as 'done'.
+      emit({ type: 'error', error: err.message });
+      try {
+        const parsed = await parseMarkdownPage(trimmed, {
+          recentAnsweredQuestions: db.getRecentAnsweredQuestions(150),
+          knownAliases: db.getKnownAliases(),
+          notebookGlossary: db.getGlossary(),
+          priorContext: buildPriorContext(db.getRecentPagesForContext(null, null, 5)),
+          userDate: isoDate,
+          userTitle: (title && String(title).trim()) || null,
+        });
+        const saved = _saveMarkdownPage(parsed, trimmed, isoDate);
+        emit({ type: 'done', ...saved });
+      } catch (err2) {
+        emit({ type: 'error', error: err2.message, fatal: true });
+      }
+    }
+    res.end();
+    return;
+  }
+
   try {
-    const recentAnswered = db.getRecentAnsweredQuestions(150);
-    const knownAliases = db.getKnownAliases();
-    const notebookGlossary = db.getGlossary();
-    const priorContext = buildPriorContext(db.getRecentPagesForContext(null, null, 5));
     const parsed = await parseMarkdownPage(trimmed, {
-      recentAnsweredQuestions: recentAnswered,
-      knownAliases,
-      notebookGlossary,
-      priorContext,
+      recentAnsweredQuestions: db.getRecentAnsweredQuestions(150),
+      knownAliases: db.getKnownAliases(),
+      notebookGlossary: db.getGlossary(),
+      priorContext: buildPriorContext(db.getRecentPagesForContext(null, null, 5)),
       userDate: isoDate,
       userTitle: (title && String(title).trim()) || null,
     });
-    const pageObj = (parsed.pages && parsed.pages[0]) || {};
-
-    // Force raw_ocr_text to the exact markdown as typed — Gemini's copy may drop
-    // whitespace or escape characters. The transcript endpoint serves this back.
-    pageObj.raw_ocr_text = trimmed;
-    // Markdown notes have no notebook position — clear these even if Gemini filled them.
-    pageObj.volume = null;
-    pageObj.page_number = null;
-    pageObj.continued_from = null;
-    pageObj.continued_to = null;
-
-    const scanRelPath = `markdown:${crypto.randomUUID()}`;
-    const result = savePageFromParse(pageObj, scanRelPath, null, 1, { sourceKindOverride: 'markdown' });
-
-    // Stamp captured_at to the user-selected date at noon, so daily-log grouping
-    // lands on the intended day regardless of the machine's TZ / upload time.
-    try { db.updatePage(result.page_id, { captured_at: `${isoDate}T12:00:00` }); } catch {}
-
-    // Ensure the page is filed to the daily_log for the selected date. Gemini may
-    // have already emitted a daily_log collection_hint — linkPageToDailyLog is a
-    // no-op if the link exists, so this is safe either way.
-    let dl = db.findDailyLogByDate(isoDate);
-    if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: isoDate });
-    try { db.linkPageToDailyLog(result.page_id, dl.id, 1.0); } catch {}
-
-    // Fire-and-forget AI index classification, mirroring the voice path.
-    setImmediate(() => classifyPageForIndexesInBackground(result.page_id));
-
-    res.json({
-      ok: true,
-      page_id: result.page_id,
-      date: isoDate,
-      summary: result.summary,
-      items_count: result.items_count,
-      backlog_count: result.backlog_count,
-      collections: result.collections,
-      daily_log: { id: dl.id, date: isoDate },
-    });
+    const saved = _saveMarkdownPage(parsed, trimmed, isoDate);
+    res.json({ ok: true, ...saved });
   } catch (err) {
     console.error('markdown ingest failed:', err);
     res.status(500).json({ error: 'Markdown ingest failed', detail: err.message });
   }
 });
+
+// Shared save helper — takes a parseMarkdownPage result and the raw markdown,
+// returns the page-id + summary + counts shape both the streaming and
+// non-streaming endpoints emit.
+function _saveMarkdownPage(parsed, trimmed, isoDate) {
+  const pageObj = (parsed.pages && parsed.pages[0]) || {};
+  pageObj.raw_ocr_text = trimmed;
+  pageObj.volume = null;
+  pageObj.page_number = null;
+  pageObj.continued_from = null;
+  pageObj.continued_to = null;
+  const scanRelPath = `markdown:${crypto.randomUUID()}`;
+  const result = savePageFromParse(pageObj, scanRelPath, null, 1, { sourceKindOverride: 'markdown' });
+  try { db.updatePage(result.page_id, { captured_at: `${isoDate}T12:00:00` }); } catch {}
+  let dl = db.findDailyLogByDate(isoDate);
+  if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: isoDate });
+  try { db.linkPageToDailyLog(result.page_id, dl.id, 1.0); } catch {}
+  setImmediate(() => classifyPageForIndexesInBackground(result.page_id));
+  return {
+    page_id: result.page_id,
+    date: isoDate,
+    summary: result.summary,
+    items_count: result.items_count,
+    backlog_count: result.backlog_count,
+    collections: result.collections,
+    daily_log: { id: dl.id, date: isoDate },
+  };
+}
 
 // Build a short text block describing recent pages' collection membership,
 // so Gemini can detect continuations. Used on every ingest.

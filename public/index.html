@@ -4058,16 +4058,52 @@ function renderVoiceRecorder(streamHost) {
       if (!blob.size) { status.textContent = 'No audio captured'; return; }
       status.textContent = `Uploading (${Math.round(blob.size/1024)}KB)…`;
       recBtn.disabled = true;
+      // Live-entity chip host — entity chips appear here as Gemini streams
+      // them back. Falls back gracefully if the browser can't stream.
+      let chipHost = null;
       try {
         const fd = new FormData();
         fd.append('audio', blob, `memo.${ext}`);
         fd.append('date', todayIso());
-        const res = await fetch('/api/ingest/voice-audio', { method: 'POST', body: fd });
+        // Request NDJSON streaming. If the browser's fetch doesn't support
+        // streamed bodies, the server still writes the full payload and the
+        // non-streaming parse runs server-side — the client just reads it all
+        // at once and gets the final 'done' frame.
+        const supportsStream = typeof ReadableStream !== 'undefined' && typeof TextDecoder !== 'undefined';
+        const res = await fetch('/api/ingest/voice-audio', {
+          method: 'POST',
+          body: fd,
+          headers: supportsStream ? { 'Accept': 'application/x-ndjson' } : {},
+        });
         if (!res.ok) {
           const body = await res.text().catch(() => '');
           throw new Error(`upload failed (${res.status}) ${body.slice(0, 160)}`);
         }
-        const result = await res.json();
+        const contentType = res.headers.get('content-type') || '';
+        let result = null;
+        if (/x-ndjson/i.test(contentType) && supportsStream) {
+          // Streaming: consume ndjson frames and render chips as they arrive.
+          chipHost = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } });
+          row.appendChild(chipHost);
+          for await (const frame of ndjson(res)) {
+            if (frame.type === 'transcript') {
+              status.textContent = `Transcribed ${frame.transcript.length} chars · parsing…`;
+            } else if (frame.type === 'delta') {
+              for (const e of (frame.entities || [])) {
+                const label = e.label || e.canonical || '(entity)';
+                chipHost.appendChild(h('span', { class: 'chip soft', title: e.role_summary || e.kind || '' }, `${e.kind === 'scripture' ? '✝' : e.kind === 'person' ? '◉' : '#'} ${label}`));
+              }
+              if (frame.summary) status.textContent = 'Parsing · ' + frame.summary.slice(0, 60);
+            } else if (frame.type === 'done') {
+              result = frame;
+            } else if (frame.type === 'error' && frame.fatal) {
+              throw new Error(frame.error || 'parse failed');
+            }
+          }
+          if (!result) throw new Error('stream ended without save confirmation');
+        } else {
+          result = await res.json();
+        }
         status.textContent = `Saved · ${result.items_count || 0} items`;
         // Confirmation tile — tap to open the detail.
         const tile = h('div', { class: 'ingest-tile' },

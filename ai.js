@@ -1104,6 +1104,193 @@ Return JSON:
   }
 }
 
+// Streaming variant of parseVoiceMemo. Returns an async iterator that yields
+// ndjson-shaped frames as Gemini's response arrives:
+//   { type:'delta', entities:[...], items:[...], summary?:string }
+//   { type:'final', parsed:<full { summary, items, entities, backlog_items }> }
+//
+// Consumers should render chips from the `entities` field as deltas arrive,
+// then use `parsed` (identical shape to parseVoiceMemo) to drive the save
+// path. Errors during streaming throw up through the iterator; the caller
+// is expected to fall back to parseVoiceMemo() on any failure.
+async function* parseVoiceMemoStream(transcript, recentAnsweredQuestions = [], knownAliases = [], notebookGlossary = []) {
+  const answeredBlock = recentAnsweredQuestions.length
+    ? `The user has previously answered these — do NOT re-ask them:\n${recentAnsweredQuestions.map(q => `- Q: ${q.subject}  A: ${q.answer}`).join('\n')}\n\n`
+    : '';
+  const aliasesBlock = knownAliases.length
+    ? `Known person aliases (when the transcript names any of these nicknames, emit the canonical person):\n${knownAliases.map(a => `- ${a.aliases.join(', ')} → ${a.canonical}`).join('\n')}\n\n`
+    : '';
+  const glossaryBlock = notebookGlossary.length
+    ? `Notebook vocabulary — do NOT ask about these:\n${notebookGlossary.map(g => `- ${g.term} → ${g.meaning}`).join('\n')}\n\n`
+    : '';
+  const userText = `${answeredBlock}${aliasesBlock}${glossaryBlock}${VOICE_PROMPT}\n\nTRANSCRIPT:\n${transcript}`;
+
+  const stream = await genai.models.generateContentStream({
+    model: PARSE_MODEL,
+    contents: [{ role: 'user', parts: [{ text: userText }] }],
+    config: {
+      systemInstruction: VOICE_SYSTEM,
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+      maxOutputTokens: 4096,
+    },
+  });
+
+  yield* _streamJsonDeltas(stream);
+}
+
+// Streaming variant of parseMarkdownPage. Same contract as
+// parseVoiceMemoStream — deltas then a final frame. Fall back to
+// parseMarkdownPage on any error.
+async function* parseMarkdownPageStream(markdown, { recentAnsweredQuestions = [], knownAliases = [], notebookGlossary = [], priorContext = '', userDate = null, userTitle = null } = {}) {
+  const answeredBlock = recentAnsweredQuestions.length
+    ? `The user has previously answered these — do NOT re-ask:\n${recentAnsweredQuestions.map(q => `- Q: ${q.subject}  A: ${q.answer}`).join('\n')}\n\n`
+    : '';
+  const aliasesBlock = knownAliases.length
+    ? `Known person aliases (emit canonical when the document mentions any of these):\n${knownAliases.map(a => `- ${a.aliases.join(', ')} → ${a.canonical}`).join('\n')}\n\n`
+    : '';
+  const glossaryBlock = notebookGlossary.length
+    ? `Notebook vocabulary — do NOT ask about these:\n${notebookGlossary.map(g => `- ${g.term} → ${g.meaning}`).join('\n')}\n\n`
+    : '';
+  const priorBlock = priorContext
+    ? `Recently ingested pages (for collection-continuation detection only, NEVER a source of entities):\n${priorContext}\n\n`
+    : '';
+  const userContextBlock = (userDate || userTitle)
+    ? `User-supplied context for this note:\n${userDate ? `- captured date: ${userDate}\n` : ''}${userTitle ? `- user-supplied title: ${userTitle}\n` : ''}\n`
+    : '';
+  const userText = `${answeredBlock}${aliasesBlock}${glossaryBlock}${priorBlock}${userContextBlock}${MARKDOWN_PROMPT}\n\nMARKDOWN:\n${markdown}`;
+
+  const stream = await genai.models.generateContentStream({
+    model: PARSE_MODEL,
+    contents: [{ role: 'user', parts: [{ text: userText }] }],
+    config: {
+      systemInstruction: MARKDOWN_SYSTEM,
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+      maxOutputTokens: 8192,
+    },
+  });
+
+  yield* _streamJsonDeltas(stream, { unwrapPages: true });
+}
+
+// Shared streaming helper. Accumulates chunks, periodically attempts to
+// parse the running JSON (via a lenient trailing-close heuristic), and
+// yields delta frames of newly-visible entities. When the stream ends,
+// yields a final frame with the fully-parsed object.
+//
+// The heuristic: JSON mode responses start with `{`. After each chunk,
+// we balance outstanding brackets/braces/strings, append enough closers
+// to make it parseable, and try JSON.parse. If it succeeds, any new
+// entries in `entities` / `items` relative to the last snapshot become
+// delta frames. This works well for Gemini's depth-first JSON emission.
+async function* _streamJsonDeltas(stream, { unwrapPages = false } = {}) {
+  let buf = '';
+  let lastEntities = 0;
+  let lastItems = 0;
+  let lastSummary = null;
+
+  const extractSnapshot = () => {
+    // Strip any accidental code fences and trailing prose.
+    let text = buf.trim();
+    text = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '');
+    // Try the full text first — it may be complete already.
+    const attempts = [text, _closeOpenJson(text)];
+    for (const candidate of attempts) {
+      if (!candidate) continue;
+      try { return JSON.parse(candidate); } catch { /* keep trying */ }
+    }
+    return null;
+  };
+
+  for await (const chunk of stream) {
+    const piece = chunk && chunk.text ? chunk.text : '';
+    if (!piece) continue;
+    buf += piece;
+    const snap = extractSnapshot();
+    if (!snap) continue;
+    const obj = unwrapPages && Array.isArray(snap.pages) && snap.pages[0] ? snap.pages[0] : snap;
+    const entities = Array.isArray(obj.entities) ? obj.entities : [];
+    const items = Array.isArray(obj.items) ? obj.items : [];
+    const summary = obj.summary || null;
+    // Hold back the very last entity/item — it may still be incomplete.
+    const safeEntCount = Math.max(entities.length - 1, 0);
+    const safeItemCount = Math.max(items.length - 1, 0);
+    const newEntities = entities.slice(lastEntities, safeEntCount);
+    const newItems = items.slice(lastItems, safeItemCount);
+    if (newEntities.length || newItems.length || (summary && summary !== lastSummary)) {
+      yield {
+        type: 'delta',
+        entities: newEntities,
+        items: newItems,
+        summary: summary && summary !== lastSummary ? summary : undefined,
+      };
+      lastEntities = safeEntCount;
+      lastItems = safeItemCount;
+      if (summary) lastSummary = summary;
+    }
+  }
+
+  // Final pass — clean + parse the complete buffer without the hold-back.
+  const raw = buf.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '');
+  if (!raw) throw new Error('Gemini streamed empty response');
+  const parsed = JSON.parse(raw);
+  const final = unwrapPages
+    ? (Array.isArray(parsed.pages) && parsed.pages.length ? { pages: parsed.pages } : { pages: [parsed] })
+    : parsed;
+  yield { type: 'final', parsed: final };
+}
+
+// Rough auto-closer for an in-progress JSON buffer. Walks the string,
+// tracking string state and open brackets/braces, and appends matching
+// closers so JSON.parse has a chance to succeed mid-stream. Lossy — a
+// trailing partial number or key gets stripped — but good enough for
+// "show me the entities you've emitted so far."
+function _closeOpenJson(text) {
+  if (!text) return '';
+  const stack = [];
+  let inStr = false;
+  let esc = false;
+  let lastComma = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (esc) { esc = false; continue; }
+    if (inStr) {
+      if (c === '\\') { esc = true; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{' || c === '[') stack.push(c);
+    else if (c === '}' || c === ']') stack.pop();
+    else if (c === ',' && stack.length) lastComma = i;
+  }
+  let trimmed = text;
+  if (inStr) {
+    // Drop the in-progress string token entirely — find the preceding comma
+    // or opener to cut cleanly.
+    const cut = Math.max(lastComma, trimmed.lastIndexOf('{'), trimmed.lastIndexOf('['));
+    if (cut > 0) trimmed = trimmed.slice(0, cut);
+  } else {
+    // Drop a trailing partial number/keyword by cutting at the last comma.
+    if (lastComma > 0 && !/[}\]]\s*$/.test(trimmed)) trimmed = trimmed.slice(0, lastComma);
+  }
+  // Rebuild stack on the trimmed string (simpler than reconciling).
+  const s2 = [];
+  let inS = false, es = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const c = trimmed[i];
+    if (es) { es = false; continue; }
+    if (inS) { if (c === '\\') es = true; else if (c === '"') inS = false; continue; }
+    if (c === '"') { inS = true; continue; }
+    if (c === '{' || c === '[') s2.push(c);
+    else if (c === '}' || c === ']') s2.pop();
+  }
+  let tail = '';
+  for (let i = s2.length - 1; i >= 0; i--) tail += s2[i] === '{' ? '}' : ']';
+  return trimmed + tail;
+}
+
 // Transcribe a recorded audio file (webm / mp4 / aac / m4a / wav) into a
 // plain-text transcript via Gemini flash. Returns the trimmed transcript
 // string. Throws on empty response. Used by /api/ingest/voice-audio which
@@ -1134,4 +1321,5 @@ module.exports = {
   parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
   classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
+  parseVoiceMemoStream, parseMarkdownPageStream,
 };
