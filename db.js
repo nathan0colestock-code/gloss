@@ -568,6 +568,78 @@ function deduplicatePages() {
 // Any-to-any, multi-parent polymorphic tree. All mutations go through here
 // so cycle protection + dedupe happen in one place.
 
+// Preload everything listIndexTree needs in a fixed number of queries so
+// _buildIndexRow doesn't issue a DB call per node. Returns a context object
+// passed through the recursive tree walk.
+function _loadIndexContext() {
+  // All index_parents edges (one query)
+  const allEdges = db.prepare(`SELECT parent_kind, parent_id, child_kind, child_id FROM index_parents`).all();
+
+  const hasParentInSameKind = new Set(); // "kind:id" → node has a same-kind parent
+  const childrenMap = new Map();         // "kind:id" → [{kind,id}]
+  const parentMap   = new Map();         // "kind:id" → [{kind,id}]
+  for (const e of allEdges) {
+    if (e.parent_kind === e.child_kind) hasParentInSameKind.add(`${e.child_kind}:${e.child_id}`);
+    const pk = `${e.parent_kind}:${e.parent_id}`;
+    if (!childrenMap.has(pk)) childrenMap.set(pk, []);
+    childrenMap.get(pk).push({ kind: e.child_kind, id: e.child_id });
+    const ck = `${e.child_kind}:${e.child_id}`;
+    if (!parentMap.has(ck)) parentMap.set(ck, []);
+    parentMap.get(ck).push({ kind: e.parent_kind, id: e.parent_id });
+  }
+
+  // Row labels / metadata per kind (9 queries, one per kind, vs one per node)
+  const rowMap = new Map();
+  const load = (kind, rows, extra) => {
+    for (const r of rows) rowMap.set(`${kind}:${r.id}`, { id: r.id, label: r.label, archived_at: r.archived_at || null, ...extra(r) });
+  };
+
+  load('heading', db.prepare(`SELECT id, label, archived_at, scope FROM headings`).all(),
+    r => ({ meta: { scope: r.scope || 'collection' } }));
+  load('collection', db.prepare(`SELECT id, title as label, archived_at FROM collections`).all(), () => ({}));
+  load('book', db.prepare(`
+    SELECT b.id, b.title as label, b.archived_at, COALESCE(e.label, b.author_label) as author
+    FROM books b LEFT JOIN entities e ON e.id = b.author_entity_id
+  `).all(), r => ({ meta: { author_label: r.author || null } }));
+  load('artifact', db.prepare(`SELECT id, title as label, archived_at, notes FROM artifacts`).all(),
+    r => ({ meta: { notes: r.notes || null } }));
+  load('reference', db.prepare(`SELECT id, title as label, archived_at FROM reference_materials`).all(), () => ({}));
+  load('person', db.prepare(`SELECT id, label, archived_at FROM people`).all(), () => ({}));
+  load('topic', db.prepare(`SELECT id, label, archived_at FROM entities WHERE kind = 'topic'`).all(), () => ({}));
+  load('scripture', db.prepare(`SELECT id, canonical as label, archived_at, book, chapter, verse_start, verse_end FROM scripture_refs`).all(),
+    r => ({ meta: { book: r.book || null, chapter: r.chapter ?? null, verse_start: r.verse_start ?? null, verse_end: r.verse_end ?? null } }));
+  load('user_index', db.prepare(`SELECT id, title as label, archived_at, is_ai_generated FROM user_indexes`).all(),
+    r => ({ is_ai_generated: r.is_ai_generated }));
+
+  // Direct page counts — one query (GROUP BY) instead of one COUNT per node
+  const directCounts = new Map();
+  for (const r of db.prepare(`
+    SELECT to_type as kind, to_id as id, COUNT(DISTINCT from_id) as c
+    FROM links WHERE from_type = 'page' GROUP BY to_type, to_id
+  `).all()) directCounts.set(`${r.kind}:${r.id}`, r.c);
+
+  // Total page counts (direct + inherited from all descendants) — one recursive
+  // CTE for all nodes at once instead of one CTE per node.
+  const totalCounts = new Map();
+  for (const r of db.prepare(`
+    WITH RECURSIVE tree_edges(anc_kind, anc_id, leaf_kind, leaf_id) AS (
+      SELECT parent_kind, parent_id, child_kind, child_id FROM index_parents
+      UNION
+      SELECT t.anc_kind, t.anc_id, ip.child_kind, ip.child_id
+      FROM index_parents ip JOIN tree_edges t ON t.leaf_kind = ip.parent_kind AND t.leaf_id = ip.parent_id
+    ),
+    all_pairs(kind, id, page_id) AS (
+      SELECT to_type, to_id, from_id FROM links WHERE from_type = 'page'
+      UNION
+      SELECT t.anc_kind, t.anc_id, l.from_id
+      FROM tree_edges t JOIN links l ON l.to_type = t.leaf_kind AND l.to_id = t.leaf_id AND l.from_type = 'page'
+    )
+    SELECT kind, id, COUNT(DISTINCT page_id) as c FROM all_pairs GROUP BY kind, id
+  `).all()) totalCounts.set(`${r.kind}:${r.id}`, r.c);
+
+  return { rowMap, childrenMap, parentMap, hasParentInSameKind, directCounts, totalCounts };
+}
+
 // Every index kind recognized by the tree. Extended map of the older
 // _ENTITY_KIND_MAP — adds artifact, reference, user_index.
 const _INDEX_KIND_TABLE = {
@@ -848,10 +920,15 @@ function getIndexNodeConnections(kind, id) {
 // Unified row shape for the tree endpoint:
 //   { kind, id, label, directPageCount, totalPageCount,
 //     parents: [{kind,id,label}], children: [Row...], archivedAt, isAiGenerated }
-function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
-  const row = lookupIndexRow(kind, id);
-  if (!row) return null;
+// Pass ctx (from _loadIndexContext) to avoid per-node DB calls during tree builds.
+function _buildIndexRow(kind, id, { seen = new Set(), ctx } = {}) {
   const nodeKey = `${kind}:${id}`;
+  const row = ctx ? ctx.rowMap.get(nodeKey) : lookupIndexRow(kind, id);
+  if (!row) return null;
+
+  const direct = ctx ? (ctx.directCounts.get(nodeKey) ?? 0) : _directPageCount(kind, id);
+  const total  = ctx ? (ctx.totalCounts.get(nodeKey) ?? direct) : _totalPageCount(kind, id);
+
   if (seen.has(nodeKey)) {
     // DAG: a node can appear under multiple parents. Render it on first visit
     // only; subsequent visits return a shallow placeholder to keep the tree
@@ -859,8 +936,8 @@ function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
     return {
       kind, id, label: row.label,
       meta: row.meta || null,
-      directPageCount: _directPageCount(kind, id),
-      totalPageCount: _totalPageCount(kind, id),
+      directPageCount: direct,
+      totalPageCount: total,
       parents: [], children: [],
       archivedAt: row.archived_at || null,
       isAiGenerated: !!row.is_ai_generated,
@@ -868,14 +945,28 @@ function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
     };
   }
   seen.add(nodeKey);
-  const kids = getIndexChildren(kind, id);
+
+  let kids, parents;
+  if (ctx) {
+    kids = (ctx.childrenMap.get(nodeKey) || [])
+      .map(c => { const r = ctx.rowMap.get(`${c.kind}:${c.id}`); return r ? { kind: c.kind, id: c.id, label: r.label, archived_at: r.archived_at } : null; })
+      .filter(Boolean)
+      .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    parents = (ctx.parentMap.get(nodeKey) || [])
+      .map(p => { const r = ctx.rowMap.get(`${p.kind}:${p.id}`); return r ? { kind: p.kind, id: p.id, label: r.label } : null; })
+      .filter(Boolean);
+  } else {
+    kids    = getIndexChildren(kind, id);
+    parents = getIndexParents(kind, id);
+  }
+
   return {
     kind, id, label: row.label,
     meta: row.meta || null,
-    directPageCount: _directPageCount(kind, id),
-    totalPageCount: _totalPageCount(kind, id),
-    parents: getIndexParents(kind, id),
-    children: kids.map(c => _buildIndexRow(c.kind, c.id, { seen })).filter(Boolean),
+    directPageCount: direct,
+    totalPageCount: total,
+    parents,
+    children: kids.map(c => _buildIndexRow(c.kind, c.id, { seen, ctx })).filter(Boolean),
     archivedAt: row.archived_at || null,
     isAiGenerated: !!row.is_ai_generated,
   };
@@ -887,6 +978,7 @@ function _buildIndexRow(kind, id, { seen = new Set() } = {}) {
 // level of their own kind, since the user expects to find every topic under
 // Topics regardless of whether it also hangs off a user_index).
 function listIndexTree({ includeArchived = false } = {}) {
+  const ctx = _loadIndexContext();
   const kinds = [];
   const KIND_LABELS = {
     heading: 'Headings',
@@ -905,21 +997,15 @@ function listIndexTree({ includeArchived = false } = {}) {
     const archivedRows = includeArchived
       ? db.prepare(`SELECT id FROM ${spec.table} WHERE ${whereArchived} ${kindFilter} ORDER BY ${spec.labelCol} COLLATE NOCASE`).all()
       : [];
-    // Top-level rows are those whose only parents (if any) are in a DIFFERENT
-    // kind. This keeps a topic with a user_index parent visible at the top of
-    // the Topics section too.
+    // Top-level rows: nodes with no same-kind parent (cross-kind parents are OK —
+    // a topic under a user_index still appears at the top of the Topics section).
+    const filterTopLevel = (rows) => rows.filter(r => !ctx.hasParentInSameKind.has(`${kind}:${r.id}`));
     const seen = new Set();
-    const filterTopLevel = (rows) => rows.filter(r => {
-      const sameKindParents = db.prepare(
-        `SELECT 1 FROM index_parents WHERE child_kind = ? AND child_id = ? AND parent_kind = ? LIMIT 1`
-      ).get(kind, r.id, kind);
-      return !sameKindParents;
-    });
     kinds.push({
       kind,
       label: KIND_LABELS[kind] || kind,
-      active: filterTopLevel(activeRows).map(r => _buildIndexRow(kind, r.id, { seen })).filter(Boolean),
-      archived: filterTopLevel(archivedRows).map(r => _buildIndexRow(kind, r.id, { seen: new Set() })).filter(Boolean),
+      active:   filterTopLevel(activeRows).map(r => _buildIndexRow(kind, r.id, { seen, ctx })).filter(Boolean),
+      archived: filterTopLevel(archivedRows).map(r => _buildIndexRow(kind, r.id, { seen: new Set(), ctx })).filter(Boolean),
     });
   }
   return { kinds };
@@ -2793,35 +2879,6 @@ function getTopicsIndex() {
   );
 }
 
-// --- Projects ---
-
-function listProjects() {
-  return db.prepare(`SELECT * FROM projects ORDER BY
-    CASE status WHEN 'active' THEN 0 WHEN 'someday' THEN 1 WHEN 'completed' THEN 2 ELSE 3 END,
-    COALESCE(target_date, '9999-12-31'),
-    created_at DESC`).all();
-}
-
-function createProject({ id, title, description, start_date, target_date, due_date, status }) {
-  db.prepare(`
-    INSERT INTO projects (id, title, description, start_date, target_date, due_date, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 'active'), datetime('now'))
-  `).run(id, title, description ?? null, start_date ?? null, target_date ?? null, due_date ?? null, status ?? null);
-  return db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
-}
-
-function updateProject(id, { title, description, start_date, target_date, due_date, status }) {
-  return db.prepare(`
-    UPDATE projects SET
-      title = COALESCE(?, title),
-      description = COALESCE(?, description),
-      start_date = COALESCE(?, start_date),
-      target_date = COALESCE(?, target_date),
-      due_date = COALESCE(?, due_date),
-      status = COALESCE(?, status)
-    WHERE id = ?
-  `).run(title ?? null, description ?? null, start_date ?? null, target_date ?? null, due_date ?? null, status ?? null, id);
-}
 
 // --- Governing values (versioned append-only) ---
 
@@ -2887,11 +2944,6 @@ function deleteCommitment(id) {
   db.prepare('UPDATE commitments SET parent_id = NULL WHERE parent_id = ?').run(id);
   db.prepare("DELETE FROM links WHERE (from_type = 'commitment' AND from_id = ?) OR (to_type = 'commitment' AND to_id = ?)").run(id, id);
   return db.prepare('DELETE FROM commitments WHERE id = ?').run(id);
-}
-
-function deleteProject(id) {
-  db.prepare("DELETE FROM links WHERE (from_type = 'project' AND from_id = ?) OR (to_type = 'project' AND to_id = ?)").run(id, id);
-  return db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 }
 
 function updateCommitment(id, { text, value_slug, status, start_date, target_date, due_date, parent_id, collection_id }) {
@@ -5450,15 +5502,23 @@ function getHomePayload() {
   }));
 
   const ws = _isoMondayOf(new Date());
-  const openRocks = listRocks({ weekStart: ws }).filter(r => r.status !== 'done').map(r => {
-    const coll = db.prepare(`
-      SELECT c.id, c.title FROM links l
+  const allRocks = listRocks({ weekStart: ws }).filter(r => r.status !== 'done');
+  // Batch-load rock→collection links (one query instead of one per rock)
+  const rockCollMap = new Map();
+  if (allRocks.length > 0) {
+    const ph = allRocks.map(() => '?').join(',');
+    for (const row of db.prepare(`
+      SELECT l.from_id as rock_id, c.id, c.title FROM links l
       JOIN collections c ON c.id = l.to_id
-      WHERE l.from_type='rock' AND l.from_id = ? AND l.to_type='collection'
-      LIMIT 1
-    `).get(r.id);
-    return { id: r.id, title: r.title, status: r.status, role_label: r.role_label || null, linked_collection: coll || null };
-  });
+      WHERE l.from_type='rock' AND l.to_type='collection' AND l.from_id IN (${ph})
+    `).all(...allRocks.map(r => r.id))) {
+      if (!rockCollMap.has(row.rock_id)) rockCollMap.set(row.rock_id, { id: row.id, title: row.title });
+    }
+  }
+  const openRocks = allRocks.map(r => ({
+    id: r.id, title: r.title, status: r.status, role_label: r.role_label || null,
+    linked_collection: rockCollMap.get(r.id) || null,
+  }));
 
   const reviewCollections = db.prepare(`
     SELECT id, title, kind FROM collections
@@ -5496,7 +5556,7 @@ module.exports = {
   updateCollection, updatePage,
   insertLink,
   insertBacklogItems, getPendingBacklog, updateBacklogStatus, getBacklogItem,
-  getPendingBacklogForPage, getPendingBacklogForCollection, getRecentAnsweredQuestions,
+  getRecentAnsweredQuestions,
   upsertGlossaryTerm, getGlossary, isTermInGlossary,
   extractGlossaryEntryFromBacklog, syncGlossaryFromBacklog,
   findCollection, createCollection, linkPageToCollection,
@@ -5506,7 +5566,6 @@ module.exports = {
   reclassifyPersonAsTopic,
   getTopicsIndex, updateTopicLabel, setTopicParent,
   createBook, updateBook, deleteBook, mergeBookInto, getBook, listBooks, listBooksGroupedByAuthor, getBooksIndex, linkPageToBook, unlinkPageFromBook,
-  listProjects, createProject, updateProject, deleteProject,
   currentValues, getValueHistory, createValue, appendValueVersion,
   listCommitments, createCommitment, updateCommitment, deleteCommitment, listCommitmentsTimeline,
   listArtifacts, createArtifact, updateArtifact, addArtifactVersion,
