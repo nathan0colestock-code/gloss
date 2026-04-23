@@ -25,6 +25,12 @@ Browse collections, people, topics, scripture references, books, artifacts, and 
 
 ![Index view with tabs for collections, artifacts, people, topics, scripture, books, references](docs/screenshots/index.png)
 
+### Research Briefing
+Capture → **✎ Briefing** opens `/research.html`. Type (or dictate) a topic; gloss searches your notebook + comms + black in parallel, optionally asks Gemini to weave a short narrative, and renders a print-friendly page with citations back to specific notebook spreads (e.g. "Notebook 3, page 14"). Designed for sermon prep — print it, go offline, write.
+
+### View in Comms
+People with priority ≥ 1 on their detail page show a "View in Comms" link that deep-links into the matching contact profile in the comms app. Powered by the public `/api/suite-config` endpoint.
+
 ---
 
 ## Stack
