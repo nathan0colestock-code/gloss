@@ -226,7 +226,7 @@ body.rail-collapsed .nav-btn .lbl { display: none; }
 }
 body.rail-collapsed #rail-footer { opacity: 0; }
 
-#theme-toggle {
+#theme-toggle, #logout-btn {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 10px;
   border-radius: var(--r);
@@ -238,15 +238,18 @@ body.rail-collapsed #rail-footer { opacity: 0; }
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  margin-top: auto;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
   transition: color var(--t), background var(--t);
 }
-#theme-toggle:hover { color: var(--ink-soft); background: var(--paper-3); }
-#theme-toggle .ico { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.7; }
-#theme-toggle:hover .ico { opacity: 1; }
-#theme-toggle .lbl { transition: opacity 140ms; }
-body.rail-collapsed #theme-toggle { justify-content: center; padding: 8px 0; gap: 0; }
-body.rail-collapsed #theme-toggle .lbl { display: none; }
+#theme-toggle { margin-top: auto; }
+#theme-toggle:hover, #logout-btn:hover { color: var(--ink-soft); background: var(--paper-3); }
+#theme-toggle .ico, #logout-btn .ico { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.7; }
+#theme-toggle:hover .ico, #logout-btn:hover .ico { opacity: 1; }
+#theme-toggle .lbl, #logout-btn .lbl { transition: opacity 140ms; }
+body.rail-collapsed #theme-toggle, body.rail-collapsed #logout-btn { justify-content: center; padding: 8px 0; gap: 0; }
+body.rail-collapsed #theme-toggle .lbl, body.rail-collapsed #logout-btn .lbl { display: none; }
 
 /* Main */
 #main { flex: 1; min-width: 0; }
@@ -1182,6 +1185,12 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
       <svg class="ico" id="theme-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <span class="lbl" id="theme-lbl">Dark mode</span>
     </button>
+    <form action="/api/logout" method="POST" style="margin:0;display:contents">
+      <button type="submit" id="logout-btn" title="Sign out">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span class="lbl">Logout</span>
+      </button>
+    </form>
     <div id="rail-footer">notebook · v1</div>
   </nav>
 

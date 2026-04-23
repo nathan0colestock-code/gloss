@@ -248,12 +248,12 @@ app.get('/api/health', (req, res) => res.json({ ok: true, now: Date.now() }));
 
 app.get('/login', (req, res) => {
   const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';
-  res.type('html').send(`<!doctype html><meta charset=utf-8><title>Foxed · Sign in</title>
+  res.type('html').send(`<!doctype html><meta charset=utf-8><title>Gloss · Sign in</title>
 <style>body{font:16px system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#faf8f4}
 form{display:flex;flex-direction:column;gap:.75rem;padding:2rem;border:1px solid #ddd;border-radius:8px;background:#fff;min-width:260px}
 input,button{font:inherit;padding:.5rem .75rem;border:1px solid #ccc;border-radius:4px}
 button{background:#222;color:#fff;border-color:#222;cursor:pointer}</style>
-<form method="POST" action="/api/login"><h2 style="margin:0 0 .5rem">Foxed</h2>${err}
+<form method="POST" action="/api/login"><h2 style="margin:0 0 .5rem">Gloss</h2>${err}
 <input type="password" name="password" autofocus required placeholder="Password"/>
 <button type="submit">Sign in</button></form>`);
 });
@@ -4419,7 +4419,7 @@ app.post('/api/admin/dedup-pages', (req, res) => {
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Foxed running at http://localhost:${PORT}`);
+    console.log(`Gloss running at http://localhost:${PORT}`);
     try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
 
     if (google.isEnabled()) {
