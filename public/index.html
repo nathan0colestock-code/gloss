@@ -237,8 +237,15 @@ body.rail-collapsed #rail-footer { opacity: 0; }
   font-family: var(--font-mono);
   text-transform: none;
   color: var(--ink-faint);
-  cursor: default;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  user-select: none;
 }
+#comms-pill:hover { background: var(--paper-3); color: var(--ink-soft); }
+#comms-pill.syncing { opacity: 0.6; pointer-events: none; }
 #comms-pill.shown { display: inline-flex; }
 #comms-pill .dot {
   width: 6px; height: 6px; border-radius: 50%;
@@ -1480,7 +1487,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
     </button>
     <div id="rail-footer">
       <span>notebook · v1</span>
-      <span id="comms-pill" title="Comms push status"><span class="dot"></span><span class="lbl">comms</span></span>
+      <button id="comms-pill" title="Click to push priority people to Comms now" type="button"><span class="dot"></span><span class="lbl">comms</span></button>
     </div>
   </nav>
 
@@ -1650,6 +1657,25 @@ async function refreshCommsPill() {
 }
 refreshCommsPill();
 setInterval(refreshCommsPill, 60_000);
+
+// Click the pill → sync now (only when shown).
+document.getElementById('comms-pill')?.addEventListener('click', async () => {
+  const pill = document.getElementById('comms-pill');
+  if (!pill.classList.contains('shown')) return;
+  pill.classList.add('syncing');
+  pill.querySelector('.lbl').textContent = 'comms · syncing…';
+  try {
+    const r = await fetch('/api/comms/sync', { method: 'POST' }).then(x => x.json());
+    if (r.ok)              toast(`Comms: pushed ${r.pushed} contacts`, 'ok');
+    else if (r.skipped)    toast(`Comms: ${r.reason}`);
+    else                   toast(`Comms sync failed: ${r.error || 'unknown'}`, 'err');
+  } catch (e) {
+    toast('Comms sync failed: ' + e.message, 'err');
+  } finally {
+    pill.classList.remove('syncing');
+    refreshCommsPill();
+  }
+});
 
 function toast(msg, kind = '') {
   const t = h('div', { class: `toast ${kind}` }, msg);
