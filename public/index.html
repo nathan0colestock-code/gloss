@@ -301,19 +301,19 @@ body.has-detail #main-inner {
   padding: 36px 32px 60px;
 }
 
-/* Detail pane */
+/* Detail pane — fast slide; perceived-speed beats prettiness on open */
 #detail {
   flex: 0 0 var(--detail-w);
-  transition: flex-basis 280ms var(--ease-decel);
+  transition: flex-basis 200ms var(--ease-decel);
   overflow: hidden;
   border-left: 1px solid var(--rule);
   background: var(--paper);
   position: sticky; top: 0; align-self: flex-start;
   max-height: 100vh;
 }
-#detail-inner { animation: detail-in 320ms var(--ease-decel); }
+#detail-inner { animation: detail-in 180ms var(--ease-decel); }
 @keyframes detail-in {
-  from { opacity: 0; transform: translateX(8px); }
+  from { opacity: 0; transform: translateX(6px); }
   to   { opacity: 1; transform: none; }
 }
 body.has-detail { --detail-w: min(58vw, 900px); }
@@ -698,6 +698,10 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .tree-row:hover .tree-row-actions { opacity: 1; pointer-events: auto; }
 .tree-row-actions .btn { padding: 1px 6px; font-size: 11px; border-color: transparent; color: var(--ink-soft); }
 .tree-row-actions .btn:hover { border-color: var(--rule); color: var(--ink); }
+/* When the detail pane is open, the tree is narrow — collapse the inline
+   action strip so labels get full width. The same actions live in the
+   right-pane detail header, so nothing is lost, just de-duplicated. */
+body.has-detail .tree-row-actions { display: none; }
 
 .tree-children {
   margin-left: 10px;
@@ -798,6 +802,31 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   letter-spacing: 0.04em;
 }
 .detail-head .sub .sub-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+.detail-head .sub .sub-day { display: inline-flex; align-items: center; gap: 4px; }
+.detail-head .sub .sub-edit-btn {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--ink-faint);
+  opacity: 0;
+  border-radius: 3px;
+  transition: opacity var(--t), color var(--t), background var(--t);
+}
+.detail-head .sub .sub-day:hover .sub-edit-btn { opacity: 1; }
+.detail-head .sub .sub-edit-btn:hover { color: var(--accent); background: var(--paper-2); }
+.detail-head .sub .sub-date-input {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 2px 4px;
+  width: auto;
+  letter-spacing: 0.04em;
+}
+.detail-head .sub .sub-link-add {
+  color: var(--ink-faint);
+  border-bottom: 1px dashed var(--ink-faint);
+  padding: 0 3px;
+  cursor: pointer;
+}
+.detail-head .sub .sub-link-add:hover { color: var(--accent); border-color: var(--accent); }
 .detail-head .title .editable {
   font-family: inherit;
   letter-spacing: inherit;
@@ -1434,15 +1463,15 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
 
 /* ── Detail-pane inner stagger — when opening a page/day, body blocks
    (scan, meta, summary, links) cascade into place instead of all arriving
-   at once. Subtler than list stagger so it feels like refinement. */
+   at once. Tight timings so the pane feels built, not plopped. */
 #detail-inner.cascade > * {
-  animation: fade-up 380ms var(--ease-decel) both;
+  animation: fade-up 240ms var(--ease-decel) both;
 }
 #detail-inner.cascade > *:nth-child(1) { animation-delay: 0ms; }
-#detail-inner.cascade > *:nth-child(2) { animation-delay: 60ms; }
-#detail-inner.cascade > *:nth-child(3) { animation-delay: 110ms; }
-#detail-inner.cascade > *:nth-child(4) { animation-delay: 150ms; }
-#detail-inner.cascade > *:nth-child(n+5) { animation-delay: 180ms; }
+#detail-inner.cascade > *:nth-child(2) { animation-delay: 30ms; }
+#detail-inner.cascade > *:nth-child(3) { animation-delay: 60ms; }
+#detail-inner.cascade > *:nth-child(4) { animation-delay: 85ms; }
+#detail-inner.cascade > *:nth-child(n+5) { animation-delay: 100ms; }
 
 /* ── View Transitions API ───────────────────────────────────────────
    Chrome, Edge, Safari 18+. Gives us free cross-fade + morph between
@@ -1676,10 +1705,10 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
     border-left: 0;
     z-index: 70;
     display: none;
-    animation: detail-slide-in 280ms var(--ease-decel);
+    animation: detail-slide-in 200ms var(--ease-decel);
   }
   @keyframes detail-slide-in {
-    from { transform: translateX(24px); opacity: 0; }
+    from { transform: translateX(16px); opacity: 0; }
     to   { transform: none; opacity: 1; }
   }
   body.has-detail #detail { display: block; }
@@ -2339,7 +2368,7 @@ const _nprog = (() => {
 // smooths over quick back-to-back requests (e.g. route → detail → back).
 const _inflight = new Map();
 const _getCache = new Map();
-const GET_CACHE_TTL = 800;
+const GET_CACHE_TTL = 3000;
 function _cacheKey(path) { return 'GET ' + path; }
 
 async function api(path, method = 'GET', body) {
@@ -2734,6 +2763,16 @@ async function renderLog(ym) {
       sumEl,
       d.page_count > 0 ? h('div', { class: 'spine-pc' }, String(d.page_count)) : h('div'),
     );
+    // Prefetch the day on hover so the detail pane opens instantly.
+    if (d.daily_log_id) {
+      let prefetched = false;
+      const prefetch = () => {
+        if (prefetched) return; prefetched = true;
+        api(`/api/daily-logs/${d.daily_log_id}`).catch(() => {});
+      };
+      row.addEventListener('mouseenter', prefetch);
+      row.addEventListener('touchstart', prefetch, { passive: true });
+    }
     row.addEventListener('click', () => openDayByDate(d));
     spine.appendChild(row);
   }
@@ -2875,6 +2914,16 @@ async function openDayDetail(id, { skipRedirect = false } = {}) {
           tile.remove();
         } catch (err) { toast(err.message, 'err'); }
       });
+      // Prefetch on hover/touchstart so the page-detail API is warm when
+      // the user clicks — the zoom-in feels instant because the cache is
+      // already populated. api() dedupes so the actual click won't refetch.
+      let prefetched = false;
+      const prefetch = () => {
+        if (prefetched) return; prefetched = true;
+        api(`/api/pages/${first.id}/detail`).catch(() => {});
+      };
+      tile.addEventListener('mouseenter', prefetch);
+      tile.addEventListener('touchstart', prefetch, { passive: true });
       tile.addEventListener('click', () => {
         detailBackContext = { label: dateLabel(date), action: () => openDayDetail(id) };
         openPageDetail(first.id);
@@ -2981,19 +3030,82 @@ function renderPageDetail(p) {
     titleEl.textContent = _isVoice ? 'Voice memo' : (_isMarkdown ? 'Markdown note' : 'Page');
   }
 
-  // Sub line: timestamp + day pill (if this page is filed to a daily log).
-  // The day chip is a clickable link — consolidated here so meta-row below
-  // can be dropped.
+  // Sub line: timestamp + day. The day is a dotted-underlined pill that
+  // opens the day when clicked AND exposes an edit pencil on hover so the
+  // user can refile the page to a different date (common after ingest
+  // misclassifies a backdated page). Saves via /api/pages/:id/refile.
   const subBits = [];
   if (p.captured_at) subBits.push(h('span', null, new Date(p.captured_at).toLocaleString()));
-  if (p.daily_log_date && p.linked_daily_logs?.[0]) {
-    subBits.push(h('span', { class: 'sub-sep' }, '·'));
-    subBits.push(h('a', {
-      class: 'sub-link',
-      onclick: (e) => { e.preventDefault(); navigate('day', p.linked_daily_logs[0].id); },
-      href: '#',
-    }, p.daily_log_date));
-  }
+  subBits.push(h('span', { class: 'sub-sep' }, '·'));
+  const dayHost = h('span', { class: 'sub-day' });
+  subBits.push(dayHost);
+  const renderDayHost = () => {
+    dayHost.innerHTML = '';
+    if (p.daily_log_date) {
+      const link = h('a', {
+        class: 'sub-link',
+        href: '#',
+        onclick: (e) => {
+          e.preventDefault();
+          const dl = p.linked_daily_logs?.[0];
+          if (dl) navigate('day', dl.id);
+        },
+      }, p.daily_log_date);
+      const edit = h('button', {
+        class: 'sub-edit-btn',
+        title: 'Change day (refile)',
+        onclick: (e) => { e.stopPropagation(); startDayEdit(); },
+      }, '✎');
+      dayHost.append(link, edit);
+    } else {
+      const addBtn = h('button', {
+        class: 'sub-link sub-link-add',
+        title: 'File this page to a day',
+        onclick: (e) => { e.preventDefault(); startDayEdit(); },
+      }, '+ add day');
+      dayHost.append(addBtn);
+    }
+  };
+  const startDayEdit = () => {
+    dayHost.innerHTML = '';
+    const input = h('input', {
+      type: 'date',
+      class: 'input sub-date-input',
+      value: p.daily_log_date || todayIso(),
+    });
+    const clear = h('button', { class: 'sub-edit-btn', title: 'Clear day' }, '×');
+    dayHost.append(input, clear);
+    input.focus();
+    let done = false;
+    const finish = async (commit, clearDay = false) => {
+      if (done) return; done = true;
+      if (!commit) { renderDayHost(); return; }
+      const nextDate = clearDay ? null : input.value.trim();
+      if (nextDate === (p.daily_log_date || null)) { renderDayHost(); return; }
+      try {
+        if (nextDate) {
+          const res = await api(`/api/pages/${p.id}/refile`, 'POST', { action: 'set-daily-log', date: nextDate });
+          p.daily_log_date = nextDate;
+          p.linked_daily_logs = res?.daily_log ? [res.daily_log] : [];
+        } else {
+          await api(`/api/pages/${p.id}/refile`, 'POST', { action: 'clear-daily-log' });
+          p.daily_log_date = null;
+          p.linked_daily_logs = [];
+        }
+        toast('refiled', 'ok');
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+      renderDayHost();
+    };
+    clear.addEventListener('click', (e) => { e.stopPropagation(); finish(true, true); });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { done = false; finish(true); }
+      if (e.key === 'Escape') { done = false; finish(false); }
+    });
+  };
+  renderDayHost();
   const subEl = h('div', { class: 'sub' }, ...subBits);
 
   const headLeft = h('div', null,
@@ -3990,25 +4102,46 @@ async function renderIndex(focusKind, focusId) {
   renderTab(activeIndexKind);
 }
 
+// Leaf index kinds — no hierarchy, no editable metadata worth a panel.
+// These rows skip the expand chevron and show actions inline on hover.
+// Details live in the right-pane entity view (click the label to open).
+const FLAT_LEAF_KINDS = new Set(['person', 'scripture', 'book']);
+
+// Action strip for a given row — shared by the inline hover row and the
+// right-pane detail view so the vocabulary stays identical.
+function rowActionsFor(kind, node, opts = {}) {
+  const btns = [];
+  btns.push(buildActionBtn('Rename', () => renameNode(kind, node)));
+  btns.push(buildActionBtn('Merge',  () => mergeNode(kind, node)));
+  if (kind === 'collection' || kind === 'topic' || kind === 'person' || kind === 'artifact') {
+    const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
+    btns.push(parentBtn);
+  }
+  if (kind === 'collection' || kind === 'artifact') {
+    btns.push(buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node)));
+  }
+  if (kind === 'collection' || kind === 'artifact' || kind === 'person') {
+    btns.push(buildActionBtn('Archive', () => archiveNode(kind, node)));
+  }
+  return btns;
+}
+
 function renderTreeRow(kind, node, depth) {
   const wrap = h('div');
   const chevron = h('div', { class: 'tree-chevron' }, '▸');
   const labelEl = h('div', { class: 'tree-label' + (node._repeat ? ' repeat' : '') }, node.label || node.title || node.canonical || '(untitled)');
   const totalP = node.totalPageCount ?? node.total_pages ?? node.directPageCount ?? node.page_count ?? null;
   const counts = h('div', { class: 'tree-counts' }, totalP != null ? String(totalP) : '');
+  const isLeaf = FLAT_LEAF_KINDS.has(kind);
 
   let thirdCol;
-  if (kind === 'person') {
+  if (isLeaf) {
     thirdCol = h('div', { class: 'tree-row-actions' });
-    thirdCol.appendChild(buildActionBtn('Rename', () => renameNode(kind, node)));
-    thirdCol.appendChild(buildActionBtn('Merge', () => mergeNode(kind, node)));
-    const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
-    thirdCol.appendChild(parentBtn);
-    thirdCol.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
+    for (const b of rowActionsFor(kind, node)) thirdCol.appendChild(b);
   } else {
     thirdCol = counts;
   }
-  const row = h('div', { class: 'tree-row' + (kind === 'person' ? ' no-expand' : '') }, chevron, labelEl, thirdCol);
+  const row = h('div', { class: 'tree-row' + (isLeaf ? ' no-expand' : '') }, chevron, labelEl, thirdCol);
   const panel = h('div', { class: 'tree-panel', style: { display: 'none' } });
   const kids = h('div', { class: 'tree-children', style: { display: 'none' } });
 
@@ -4034,7 +4167,7 @@ function renderTreeRow(kind, node, depth) {
       }
     }
   };
-  if (kind !== 'person') chevron.addEventListener('click', (e) => { e.stopPropagation(); setOpen(); });
+  if (!isLeaf) chevron.addEventListener('click', (e) => { e.stopPropagation(); setOpen(); });
   // label click → open entity pages in right pane; chevron only toggles inline metadata
   labelEl.addEventListener('click', (e) => { e.stopPropagation(); openEntityDetail(kind, node); });
 
@@ -4053,19 +4186,9 @@ function buildActionBtn(label, onClick) {
 function renderConnectionsPanel(panel, kind, node, conn) {
   panel.innerHTML = '';
 
-  // Action strip
+  // Action strip — same vocabulary as the inline hover actions + detail pane
   const actionsRow = h('div', { class: 'tree-panel-actions' });
-  const renameBtn = buildActionBtn('Rename', () => renameNode(kind, node));
-  const mergeBtn  = buildActionBtn('Merge',  () => mergeNode(kind, node));
-  const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
-  actionsRow.append(renameBtn, mergeBtn, parentBtn);
-  if (kind === 'collection' || kind === 'artifact') {
-    const headingBtn = buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node));
-    actionsRow.append(headingBtn);
-  }
-  if (kind === 'collection' || kind === 'artifact' || kind === 'person') {
-    actionsRow.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
-  }
+  for (const b of rowActionsFor(kind, node)) actionsRow.appendChild(b);
   panel.appendChild(actionsRow);
 
   // Metadata editors
@@ -4282,17 +4405,8 @@ function renderEntityDetail(kind, node, conn) {
     ? h('button', { class: 'btn-ghost', onclick: () => convertEntityDetail(kind, node) }, 'Convert to…')
     : null;
 
-  const detailParentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, detailParentBtn));
   const detailActionsRow = h('div', { class: 'tree-panel-actions', style: { padding: '10px 28px 2px' } },
-    buildActionBtn('Rename', () => renameNode(kind, node)),
-    buildActionBtn('Merge',  () => mergeNode(kind, node)),
-    detailParentBtn,
-    ...(kind === 'collection' || kind === 'artifact'
-      ? [buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node))]
-      : []),
-    ...(kind === 'collection' || kind === 'artifact' || kind === 'person'
-      ? [buildActionBtn('Archive', () => archiveNode(kind, node))]
-      : []),
+    ...rowActionsFor(kind, node),
   );
 
   detailInner.append(
