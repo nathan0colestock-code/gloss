@@ -24,7 +24,7 @@ const execFileAsync = promisify(execFile);
 const db = require('./db');
 const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
-        classifyRowForCrossKind, generateTopicalIndexEntries } = require('./ai');
+        classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio } = require('./ai');
 const google = require('./google');
 const comms = require('./comms');
 
@@ -456,6 +456,7 @@ const longCache = {
 app.use('/scans', express.static(path.join(__dirname, 'data', 'scans'), longCache));
 app.use('/artifacts', express.static(ARTIFACTS_DIR, longCache));
 app.use('/references', express.static(REFERENCES_DIR, longCache));
+app.use('/voice-memos', express.static(path.join(__dirname, 'data', 'voice-memos'), longCache));
 
 // Multer: save uploads to data/scans with original extension
 const storage = multer.diskStorage({
@@ -762,6 +763,136 @@ app.post('/api/ingest/voice', async (req, res) => {
   } catch (err) {
     console.error('voice ingest failed:', err);
     res.status(500).json({ error: 'Voice ingest failed', detail: err.message });
+  }
+});
+
+// Voice-memo audio ingest — client posts a recorded blob (webm / mp4 / aac),
+// we save it to data/voice-memos/, hand the bytes to Gemini for
+// transcription, then drive the transcript through the existing
+// parseVoiceMemo pipeline so entity extraction, backlog questions, and
+// index classification all run identically to the typed-transcript path.
+const VOICE_MEMOS_DIR = path.join(__dirname, 'data', 'voice-memos');
+fs.mkdirSync(VOICE_MEMOS_DIR, { recursive: true });
+const VOICE_AUDIO_MIMES = new Set([
+  'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/m4a', 'audio/x-m4a',
+  'audio/aac', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave',
+]);
+const voiceAudioUpload = multer({
+  storage: multer.diskStorage({
+    destination: VOICE_MEMOS_DIR,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) ||
+        ({ 'audio/webm':'.webm', 'audio/ogg':'.ogg', 'audio/mp4':'.mp4',
+           'audio/m4a':'.m4a', 'audio/x-m4a':'.m4a', 'audio/aac':'.aac',
+           'audio/mpeg':'.mp3', 'audio/wav':'.wav', 'audio/x-wav':'.wav',
+           'audio/wave':'.wav' }[file.mimetype] || '.webm');
+      cb(null, crypto.randomUUID() + ext);
+    },
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (VOICE_AUDIO_MIMES.has(file.mimetype) || (file.mimetype || '').startsWith('audio/')) cb(null, true);
+    else cb(new Error('Only audio files are accepted'));
+  },
+});
+
+app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+  const date = (req.body && req.body.date) || '';
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? date
+    : new Date().toISOString().slice(0, 10);
+  try {
+    const transcript = await transcribeAudio(req.file.path, req.file.mimetype);
+    if (!transcript || !transcript.trim()) {
+      return res.status(422).json({ error: 'Transcription returned empty text' });
+    }
+    const recentAnswered = db.getRecentAnsweredQuestions(150);
+    const knownAliases = db.getKnownAliases();
+    const notebookGlossary = db.getGlossary();
+    const parsed = await parseVoiceMemo(transcript.trim(), recentAnswered, knownAliases, notebookGlossary);
+    const pageId = crypto.randomUUID();
+
+    db.insertPage({
+      id: pageId,
+      scan_path: `voice:${pageId}`,
+      raw_ocr_text: transcript.trim(),
+      summary: parsed.summary || null,
+      source_kind: 'voice_memo',
+      captured_at: `${isoDate}T12:00:00`,
+    });
+
+    const itemRows = (parsed.items || []).map(item => ({
+      id: crypto.randomUUID(),
+      page_id: pageId,
+      kind: item.kind,
+      text: item.text,
+      confidence: item.confidence ?? 1.0,
+    }));
+    if (itemRows.length) db.insertItems(itemRows);
+
+    // Same entity-linking block as /api/ingest/voice. Duplicated intentionally —
+    // refactoring the typed-voice path is out of scope for this feature.
+    for (const entity of (parsed.entities || [])) {
+      try {
+        const roleSummary = (entity.role_summary || '').trim() || null;
+        if (entity.kind === 'scripture' && entity.book && entity.chapter) {
+          const ref = db.upsertScriptureRef({
+            canonical: entity.label, book: entity.book, chapter: entity.chapter,
+            verse_start: entity.verse_start ?? null, verse_end: entity.verse_end ?? null,
+          });
+          db.linkPageToScripture(pageId, ref.id, 1.0, roleSummary);
+        } else if (entity.kind === 'household' && entity.label) {
+          const h = db.findHouseholdByMention(entity.label) || db.upsertHouseholdByName(entity.label);
+          if (h) db.linkPageToHousehold(pageId, h.id, entity.confidence ?? 0.9, roleSummary);
+        } else if (entity.kind === 'person' && entity.label) {
+          const p = db.upsertPerson({ label: entity.label });
+          db.linkPageToPerson(pageId, p.id, 1.0, roleSummary);
+        } else if (entity.kind === 'topic' && entity.label) {
+          const id = crypto.randomUUID();
+          db.upsertEntity({ id, kind: 'topic', label: entity.label });
+          const t = db.getEntityByKindLabel('topic', entity.label);
+          if (t) db.insertLink({
+            id: crypto.randomUUID(),
+            from_type: 'page', from_id: pageId, to_type: 'topic', to_id: t.id,
+            created_by: 'foxed-voice-audio', confidence: 0.9,
+            role_summary: roleSummary,
+          });
+        }
+      } catch (e) { console.warn('voice-audio entity skip:', e.message); }
+    }
+
+    const backlogRows = (parsed.backlog_items || []).map(b => ({
+      id: crypto.randomUUID(),
+      kind: b.kind,
+      subject: b.subject,
+      proposal: b.proposal,
+      context_page_id: pageId,
+      answer_format: b.kind === 'question' ? (b.answer_format || 'short') : null,
+      answer_options: b.kind === 'question' && b.answer_format === 'choice' ? b.options : null,
+    }));
+    if (backlogRows.length) db.insertBacklogItems(backlogRows);
+
+    let dl = db.findDailyLogByDate(isoDate);
+    if (!dl) dl = db.createDailyLog({ id: crypto.randomUUID(), date: isoDate });
+    db.linkPageToDailyLog(pageId, dl.id, 1.0);
+
+    setImmediate(() => classifyPageForIndexesInBackground(pageId));
+
+    res.json({
+      ok: true,
+      page_id: pageId,
+      date: isoDate,
+      summary: parsed.summary,
+      transcript,
+      items_count: itemRows.length,
+      backlog_count: backlogRows.length,
+      daily_log: { id: dl.id, date: isoDate },
+      audio_path: `/voice-memos/${path.basename(req.file.path)}`,
+    });
+  } catch (err) {
+    console.error('voice-audio ingest failed:', err);
+    res.status(500).json({ error: 'Voice-audio ingest failed', detail: err.message });
   }
 });
 

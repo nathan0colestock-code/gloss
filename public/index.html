@@ -3496,6 +3496,7 @@ async function renderCapture() {
       h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Volume (optional)'),
       volumeIn,
       h('div', { style: { marginTop: '12px' } }, drop, fileInput),
+      renderVoiceRecorder(streamHost),
     );
   }
 
@@ -3914,6 +3915,140 @@ function attachMarkdownToolbar(ta) {
     }, 100);
   });
   return toolbar;
+}
+
+// Voice-memo recorder. Renders a [🎙 Record] button; on tap, requests mic
+// access, streams to MediaRecorder, and on stop uploads the blob to
+// /api/ingest/voice-audio. The server handles transcription via Gemini and
+// runs the transcript through the existing parseVoiceMemo pipeline — same
+// entity extraction / backlog / index classification as the typed-transcript
+// path. Graceful fallback: if MediaRecorder is unsupported (old browsers),
+// the button is hidden and a console log notes why.
+function renderVoiceRecorder(streamHost) {
+  const wrap = h('div', { style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px dashed var(--rule)' } });
+  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.log('[voice] MediaRecorder unavailable — recording UI hidden');
+    wrap.style.display = 'none';
+    return wrap;
+  }
+  const label = h('div', { class: 'lbl-mono', style: { marginBottom: '6px' } }, 'Voice memo');
+  const recBtn = h('button', { class: 'btn', style: { minWidth: '140px' } }, '🎙 Record');
+  const status = h('span', { class: 'mono soft', style: { marginLeft: '10px', fontSize: '12px' } }, '');
+  const row = h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } }, recBtn, status);
+  wrap.append(label, row);
+
+  let recorder = null;
+  let chunks = [];
+  let stream = null;
+  let startedAt = 0;
+  let timerId = null;
+  let mimeType = '';
+
+  const stopTimer = () => { if (timerId) { clearInterval(timerId); timerId = null; } };
+  const cleanupStream = () => {
+    try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
+    stream = null;
+  };
+  // iOS Safari only reliably supports mp4/aac for MediaRecorder; desktop +
+  // Android Chrome prefer webm/opus. Pick the first the browser accepts.
+  const pickMimeType = () => {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac'];
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return ''; // let the browser pick
+  };
+
+  const stopRecording = () => {
+    if (!recorder || recorder.state !== 'recording') return;
+    try { recorder.stop(); } catch {}
+  };
+
+  recBtn.addEventListener('click', async () => {
+    if (recorder && recorder.state === 'recording') { stopRecording(); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      toast(`Mic access denied: ${err.message}`, 'err');
+      return;
+    }
+    mimeType = pickMimeType();
+    try {
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    } catch (err) {
+      toast(`Can't start recorder: ${err.message}`, 'err');
+      cleanupStream();
+      return;
+    }
+    chunks = [];
+    recorder.addEventListener('dataavailable', e => { if (e.data && e.data.size) chunks.push(e.data); });
+    recorder.addEventListener('stop', async () => {
+      stopTimer();
+      cleanupStream();
+      recBtn.textContent = '🎙 Record';
+      recBtn.classList.remove('primary');
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+      const ext = /mp4|aac/.test(blob.type) ? 'm4a' : (/ogg/.test(blob.type) ? 'ogg' : 'webm');
+      if (!blob.size) { status.textContent = 'No audio captured'; return; }
+      status.textContent = `Uploading (${Math.round(blob.size/1024)}KB)…`;
+      recBtn.disabled = true;
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, `memo.${ext}`);
+        fd.append('date', todayIso());
+        const res = await fetch('/api/ingest/voice-audio', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`upload failed (${res.status}) ${body.slice(0, 160)}`);
+        }
+        const result = await res.json();
+        status.textContent = `Saved · ${result.items_count || 0} items`;
+        // Confirmation tile — tap to open the detail.
+        const tile = h('div', { class: 'ingest-tile' },
+          h('div', { class: 'meta' },
+            h('div', { class: 'vp' }, '🎙 voice memo'),
+            h('div', { class: 'sum' }, result.summary || '(no summary)'),
+          ),
+        );
+        if (result.page_id) tile.addEventListener('click', () => navigate('page', result.page_id));
+        if (streamHost) {
+          const prev = streamHost.querySelector('.ingest-stream');
+          if (!prev) {
+            const stream = h('div', { class: 'ingest-stream' }, tile);
+            streamHost.appendChild(stream);
+          } else {
+            prev.appendChild(tile);
+          }
+        }
+        toast('Voice memo saved', 'ok');
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+        toast(err.message, 'err');
+      } finally {
+        recBtn.disabled = false;
+      }
+    });
+    try {
+      recorder.start();
+    } catch (err) {
+      toast(`Recorder refused to start: ${err.message}`, 'err');
+      cleanupStream();
+      return;
+    }
+    startedAt = Date.now();
+    recBtn.textContent = '⏹ Stop';
+    recBtn.classList.add('primary');
+    const updateTimer = () => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      const m = String(Math.floor(secs / 60)).padStart(2, '0');
+      const s = String(secs % 60).padStart(2, '0');
+      status.textContent = `● recording ${m}:${s}`;
+    };
+    updateTimer();
+    timerId = setInterval(updateTimer, 500);
+  });
+
+  return wrap;
 }
 
 async function startScanIngest(file, kindHint, host, opts = {}) {

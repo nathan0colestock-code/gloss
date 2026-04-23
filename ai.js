@@ -1104,8 +1104,34 @@ Return JSON:
   }
 }
 
+// Transcribe a recorded audio file (webm / mp4 / aac / m4a / wav) into a
+// plain-text transcript via Gemini flash. Returns the trimmed transcript
+// string. Throws on empty response. Used by /api/ingest/voice-audio which
+// then hands the transcript off to parseVoiceMemo for the real entity
+// extraction — this call is intentionally narrow: audio → text, nothing
+// else. Keeping transcription separate means the pointer-summary /
+// entity-extraction prompts stay single-purpose and testable.
+async function transcribeAudio(audioPath, mimeType) {
+  const data = fs.readFileSync(audioPath);
+  const base64 = data.toString('base64');
+  const response = await genai.models.generateContent({
+    model: CHAT_MODEL,
+    contents: [{ role: 'user', parts: [
+      { text: 'Transcribe this voice memo exactly as spoken. Output only the transcript text — no commentary, no timestamps, no speaker labels, no markdown fences. Preserve the speaker\'s actual words; do not summarize.' },
+      { inlineData: { mimeType, data: base64 } },
+    ]}],
+    config: {
+      temperature: 0.0,
+      maxOutputTokens: 8192,
+    },
+  });
+  const text = (response.text || '').trim();
+  if (!text) throw new Error('Gemini returned empty transcript for audio');
+  return text;
+}
+
 module.exports = {
   parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
-  classifyRowForCrossKind, generateTopicalIndexEntries,
+  classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
 };
