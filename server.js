@@ -4393,6 +4393,41 @@ app.post('/api/admin/dedup-pages', (req, res) => {
 });
 
 // ─── Comms push — priority people → Comms app ──────────────────────────────
+// Last-push outcome tracked in-memory — persistent enough for a running server.
+const commsState = {
+  last_attempted_at: null,
+  last_success_at: null,
+  last_error: null,
+  last_count: 0,
+  last_outcome: null,   // 'ok' | 'skipped' | 'failed' | 'disabled'
+  last_skipped_reason: null,
+};
+
+async function runCommsPushAndRecord() {
+  commsState.last_attempted_at = new Date().toISOString();
+  try {
+    const r = await comms.syncContactsToComms();
+    if (r.skipped) {
+      commsState.last_outcome = 'skipped';
+      commsState.last_skipped_reason = r.reason;
+    } else if (r.ok) {
+      commsState.last_outcome = 'ok';
+      commsState.last_success_at = commsState.last_attempted_at;
+      commsState.last_count = r.pushed || 0;
+      commsState.last_error = null;
+    } else {
+      commsState.last_outcome = 'failed';
+      commsState.last_error = r.error || 'unknown';
+      commsState.last_count = r.pushed || 0;
+    }
+    return r;
+  } catch (e) {
+    commsState.last_outcome = 'failed';
+    commsState.last_error = e.message;
+    throw e;
+  }
+}
+
 // Preview the payload (no network). Useful when wiring up / debugging.
 app.get('/api/comms/preview', (req, res) => {
   try {
@@ -4404,10 +4439,19 @@ app.get('/api/comms/preview', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Health snapshot — safe to poll from the UI. No payload exposure.
+app.get('/api/comms/status', (req, res) => {
+  res.json({
+    enabled: comms.isEnabled(),
+    reason: comms.disabledReason(),
+    ...commsState,
+  });
+});
+
 // Trigger a push on demand. Returns the Comms response (or error).
 app.post('/api/comms/sync', async (req, res) => {
   try {
-    const result = await comms.syncContactsToComms();
+    const result = await runCommsPushAndRecord();
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4427,7 +4471,7 @@ if (require.main === module) {
 
     if (comms.isEnabled()) {
       const COMMS_PUSH_MS = parseInt(process.env.COMMS_PUSH_INTERVAL_MS || String(15 * 60 * 1000), 10);
-      const runPush = () => comms.syncContactsToComms()
+      const runPush = () => runCommsPushAndRecord()
         .then(r => {
           if (r.skipped) { if (DEBUG) console.log(`[comms-push] skipped: ${r.reason}`); return; }
           if (r.ok)     console.log(`[comms-push] pushed ${r.pushed} contacts`);
@@ -4437,6 +4481,8 @@ if (require.main === module) {
       setTimeout(runPush, 5000);
       setInterval(runPush, COMMS_PUSH_MS);
     } else {
+      commsState.last_outcome = 'disabled';
+      commsState.last_skipped_reason = comms.disabledReason();
       console.log(`[comms-push] disabled: ${comms.disabledReason()}`);
     }
   });
