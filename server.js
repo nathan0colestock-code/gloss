@@ -773,6 +773,7 @@ app.post('/api/ingest/voice', async (req, res) => {
       items_count: itemRows.length,
       backlog_count: backlogRows.length,
       daily_log: { id: dl.id, date: isoDate },
+      review_url: `/daily/${isoDate}`,
     });
   } catch (err) {
     console.error('voice ingest failed:', err);
