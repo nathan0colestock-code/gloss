@@ -1864,6 +1864,8 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
   .links-group-lbl { min-width: 70px; font-size: 9px; }
 }
 </style>
+<script>window.__SUITE_CURRENT__ = 'gloss';</script>
+<script src="https://maestro-nc.fly.dev/suite-switcher.js" defer></script>
 </head>
 <body>
 
@@ -4268,6 +4270,22 @@ function renderConnectionsPanel(panel, kind, node, conn) {
         return el;
       })(),
     );
+    // Cross-app link: jump to this person's Comms profile. Only appears for
+    // people with priority >= 1 (those are the ones actually pushed to Comms
+    // — the sync filter in comms.js:buildContactsPayload) and when we know
+    // the Comms origin from /api/suite-config.
+    if (SUITE_CONFIG.comms_url && (node.priority ?? 0) >= 1) {
+      const commsHref = `${SUITE_CONFIG.comms_url}/#/contacts/${encodeURIComponent(node.label || '')}`;
+      meta.append(
+        h('label', null, ''),
+        h('a', {
+          href: commsHref, target: '_blank', rel: 'noopener',
+          class: 'btn-ghost',
+          style: { display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' },
+          title: 'Open this person in Comms',
+        }, '↗ View in Comms'),
+      );
+    }
   } else if (kind === 'book') {
     meta.append(
       h('label', null, 'author'),
@@ -5066,8 +5084,18 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// Suite-wide config (other app URLs for cross-app deep links). Fetched once
+// at boot; rendering code reads SUITE_CONFIG synchronously. Missing values
+// just mean the corresponding "View in X" button stays hidden.
+let SUITE_CONFIG = {};
+async function loadSuiteConfig() {
+  try { SUITE_CONFIG = await fetch('/api/suite-config').then(r => r.json()); }
+  catch { /* fine — cross-app links just won't render */ }
+}
+
 // ─── boot ──────────────────────────────────
 if (!location.hash || location.hash === '#') location.hash = '#/log/' + ymNow();
+loadSuiteConfig();  // fire-and-forget; usable by next render after it lands
 route().finally(() => {
   // Reveal the app — remove the booting class so body content fades in,
   // then fade out the splash overlay. Use rAF so the paint is committed.
