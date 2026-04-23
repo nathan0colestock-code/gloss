@@ -962,6 +962,42 @@ body.has-detail .tree-row-actions { display: none; }
 .md-frame hr { border: none; border-top: 1px dashed var(--rule); margin: 1.2em 0; }
 .md-frame strong { font-weight: 600; }
 .md-frame em { font-style: italic; }
+
+/* Markdown draft editor. Desktop uses compact 12.5px mono; mobile bumps to
+ * 16px in the media query below so iOS doesn't auto-zoom the viewport on
+ * focus (it zooms whenever focused input font-size resolves < 16px). */
+textarea.md-editor { font-size: 12.5px; }
+
+/* Sticky formatting toolbar. Visible only on mobile AND only while the
+ * associated md-editor has focus (JS toggles `.md-toolbar-show` on <body>).
+ * Lives above the keyboard on iOS via position:sticky + the bottom
+ * safe-area inset. Hidden on desktop entirely. */
+.md-toolbar {
+  display: none;
+  position: sticky;
+  bottom: 0;
+  left: 0; right: 0;
+  z-index: 50;
+  gap: 4px;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom)) 8px;
+  background: var(--paper);
+  border-top: 1px solid var(--rule);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.md-toolbar button {
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  color: var(--ink);
+}
+.md-toolbar button:active { background: var(--paper-3); }
 .day-tile .thumb.md {
   font-family: var(--font-mono);
   font-size: 20px;
@@ -1778,6 +1814,8 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
   .chip { padding: 6px 12px; font-size: 12.5px; }
   .pill, .btn-ghost { min-height: 36px; padding: 8px 12px; }
   .input, textarea.input, select.input { padding: 10px 12px; font-size: 16px; }  /* 16px to prevent iOS zoom on focus */
+  textarea.md-editor { font-size: 16px; }  /* markdown editor overrides default 12.5px — iOS zoom guard */
+  body.md-toolbar-show .md-toolbar { display: flex; }
   .icon-btn { width: 40px; height: 40px; }
 
   /* Surface headings */
@@ -3698,10 +3736,13 @@ function openDraftDetail(draftId, listEl, backlogHost) {
 
     const dateIn = h('input', { type: 'date', class: 'input', value: draft.date, style: { maxWidth: '180px' } });
     const ta = h('textarea', {
-      class: 'input',
+      class: 'input md-editor',
       rows: 20,
       placeholder: '# On catechesis\n\nScaffolding, not cage. Three notes:\n\n- formation moves slow\n- repetition is not rote\n- the liturgy teaches',
-      style: { fontFamily: 'var(--font-mono)', fontSize: '12.5px', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
+      // Note: font-size is set via CSS (.md-editor) so the mobile media query
+      // can override it to 16px and avoid iOS auto-zoom on focus. Inline
+      // fontSize here would defeat that.
+      style: { fontFamily: 'var(--font-mono)', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
     });
     ta.value = draft.content;
 
@@ -3792,9 +3833,17 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       if (listEl) await refreshDraftList(listEl, backlogHost);
     });
 
+    // Mobile-only sticky formatting toolbar. Hidden on desktop via CSS; on
+    // mobile, shown only while the textarea has focus. Tapping a button wraps
+    // the current selection in the corresponding markdown syntax, or inserts
+    // a placeholder at the cursor if there's no selection. Uses execCommand
+    // so the browser's undo stack stays intact.
+    const toolbar = attachMarkdownToolbar(ta);
+
     body.append(
       h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
       ta,
+      toolbar,
       h('div', { class: 'lbl-mono', style: { marginTop: '14px', marginBottom: '4px' } }, 'File as'),
       fileModeBar,
       filingDetail,
@@ -3803,6 +3852,68 @@ function openDraftDetail(draftId, listEl, backlogHost) {
     detailInner.appendChild(body);
     setTimeout(() => ta.focus(), 50);
   });
+}
+
+// Build a sticky bottom formatting toolbar bound to a <textarea>. The toolbar
+// itself is always rendered; CSS scopes it to mobile viewports (≤640px) and
+// JS toggles `body.md-toolbar-show` while the textarea has focus so it only
+// appears above the on-screen keyboard when the user is actually typing.
+// Each button wraps the current selection (or inserts a template at the
+// cursor) using document.execCommand('insertText') so the native undo stack
+// stays intact — no dependency on contentEditable/TipTap/etc.
+function attachMarkdownToolbar(ta) {
+  const toolbar = h('div', { class: 'md-toolbar', role: 'toolbar' });
+  const apply = (before, after, placeholder) => {
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const selected = ta.value.slice(start, end);
+    const inner = selected || placeholder || '';
+    const insert = `${before}${inner}${after}`;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    if (!document.execCommand('insertText', false, insert)) {
+      ta.setRangeText(insert, start, end, 'end');
+    }
+    // Place the caret at the inner text so the user can immediately overtype.
+    const innerStart = start + before.length;
+    ta.setSelectionRange(innerStart, innerStart + inner.length);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const linePrefix = (prefix) => {
+    const start = ta.selectionStart;
+    const value = ta.value;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    ta.focus();
+    ta.setSelectionRange(lineStart, lineStart);
+    if (!document.execCommand('insertText', false, prefix)) {
+      ta.setRangeText(prefix, lineStart, lineStart, 'end');
+    }
+    const newPos = start + prefix.length;
+    ta.setSelectionRange(newPos, newPos);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const buttons = [
+    ['B',   () => apply('**', '**', 'bold'),           'Bold'],
+    ['I',   () => apply('*',  '*',  'italic'),         'Italic'],
+    ['H1',  () => linePrefix('# '),                    'Heading 1'],
+    ['H2',  () => linePrefix('## '),                   'Heading 2'],
+    ['•',   () => linePrefix('- '),                    'Bullet list'],
+    ['☐',   () => linePrefix('- [ ] '),                'Checklist'],
+    ['🔗',  () => apply('[', '](url)', 'link text'),   'Link'],
+  ];
+  for (const [label, handler, title] of buttons) {
+    const btn = h('button', { type: 'button', title, onmousedown: (e) => e.preventDefault() }, label);
+    btn.addEventListener('click', (e) => { e.preventDefault(); handler(); });
+    toolbar.appendChild(btn);
+  }
+  ta.addEventListener('focus', () => document.body.classList.add('md-toolbar-show'));
+  ta.addEventListener('blur',  () => {
+    // Delay so a toolbar-button tap (which briefly blurs the textarea) doesn't
+    // flicker the toolbar away between mousedown and click.
+    setTimeout(() => {
+      if (document.activeElement !== ta) document.body.classList.remove('md-toolbar-show');
+    }, 100);
+  });
+  return toolbar;
 }
 
 async function startScanIngest(file, kindHint, host, opts = {}) {
