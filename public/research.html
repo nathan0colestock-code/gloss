@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Research Briefing · Gloss</title>
+<link rel="stylesheet" href="/fonts/foxed.css">
+<style>
+  :root {
+    --ink: #1e190f; --ink-soft: #6b6450; --ink-muted: #9d9681;
+    --bg: #faf8f2; --card: #fff; --rule: #e6e0cf; --accent: #c9a97a;
+    --accent-soft: #f4ead6;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: 'foxed-sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; font-size: 15px; line-height: 1.55; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 56px 28px 120px; }
+  h1 { font-family: 'foxed-serif', ui-serif, Georgia, serif; font-size: 28px; font-weight: 500; margin: 0 0 4px; }
+  .subtitle { color: var(--ink-muted); font-size: 13px; margin-bottom: 28px; }
+  .card { background: var(--card); border: 1px solid var(--rule); border-radius: 4px; padding: 20px 22px; margin-bottom: 18px; }
+  textarea { width: 100%; min-height: 120px; padding: 12px; border: 1px solid var(--rule); border-radius: 4px; font: inherit; background: #fffdf7; color: inherit; resize: vertical; }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  button { padding: 9px 18px; border-radius: 4px; border: 1px solid var(--rule); background: #fff; color: inherit; font: inherit; cursor: pointer; }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  button.primary:disabled { opacity: 0.5; cursor: wait; }
+  button:hover { background: var(--accent-soft); }
+  button.primary:hover { background: #35301e; }
+  label.inline { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-soft); }
+  .narrative { font-family: 'foxed-serif', ui-serif, Georgia, serif; font-size: 16px; line-height: 1.7; white-space: pre-wrap; }
+  .sources-head { display: flex; gap: 10px; align-items: baseline; margin: 28px 0 10px; }
+  .sources-head h2 { font-family: 'foxed-serif', ui-serif, Georgia, serif; font-size: 18px; margin: 0; }
+  .sources-head .count { color: var(--ink-muted); font-size: 12px; }
+  .src { padding: 10px 14px; border-left: 2px solid var(--accent); background: #fffdf7; margin-bottom: 8px; border-radius: 0 4px 4px 0; }
+  .src .cite { font-size: 12px; color: var(--ink-soft); margin-bottom: 3px; font-weight: 500; }
+  .src .summary { font-size: 14px; }
+  .src.empty { color: var(--ink-muted); font-style: italic; border-left-color: var(--rule); }
+  .err { color: #b33; background: #fff3f3; padding: 10px; border-radius: 4px; margin-bottom: 14px; }
+  @media print {
+    body { background: #fff; }
+    .controls, .print-hide, button { display: none !important; }
+    .wrap { max-width: 100%; padding: 0 30px; }
+    .card { border: none; padding: 0; margin-bottom: 18px; }
+    .src { break-inside: avoid; page-break-inside: avoid; }
+    a { color: inherit; text-decoration: none; }
+    h1 { font-size: 22px; }
+  }
+</style>
+<script>window.__SUITE_CURRENT__ = 'gloss';</script>
+<script src="https://maestro-nc.fly.dev/suite-switcher.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>Research Briefing</h1>
+  <div class="subtitle">A pull from your notebook, messages, and archive on whatever's on your mind.</div>
+
+  <div class="card print-hide">
+    <label for="prompt" style="font-size:12px;color:var(--ink-soft);">Topic or brain-dump</label>
+    <textarea id="prompt" placeholder="e.g. 'Preparing a sermon on Ezra 7 — covenant renewal, teaching the law, what I've said on this before'. Use dictation (mic on iOS keyboard) if you'd rather talk."></textarea>
+    <div class="controls">
+      <button id="go" class="primary">Generate briefing</button>
+      <label class="inline"><input type="checkbox" id="synth" checked> include AI synthesis</label>
+      <button id="print" disabled>Print / save as PDF</button>
+    </div>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = sel => document.querySelector(sel);
+const state = { busy: false };
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+
+function renderBriefing(b) {
+  const out = $('#out');
+  out.innerHTML = '';
+  const root = document.createElement('div');
+
+  // Prompt heading
+  const head = document.createElement('div');
+  head.className = 'card';
+  head.innerHTML = `
+    <div class="cite" style="font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.08em;">Briefing · ${esc(new Date(b.generated_at).toLocaleString())}</div>
+    <h2 style="font-family:'foxed-serif',ui-serif,Georgia,serif;font-size:20px;margin:6px 0 0;font-weight:500;">${esc(b.prompt)}</h2>
+    <div style="color:var(--ink-muted);font-size:12px;margin-top:6px;">gloss: ${b.counts.gloss} · comms: ${b.counts.comms} · black: ${b.counts.black}</div>
+  `;
+  root.appendChild(head);
+
+  // Narrative
+  if (b.narrative) {
+    const n = document.createElement('div');
+    n.className = 'card';
+    n.innerHTML = `<div class="cite" style="font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Synthesis</div><div class="narrative">${esc(b.narrative)}</div>`;
+    root.appendChild(n);
+  } else if (b.synthesis_error) {
+    const e = document.createElement('div');
+    e.className = 'err';
+    e.textContent = `Synthesis unavailable: ${b.synthesis_error}`;
+    root.appendChild(e);
+  }
+
+  // Source sections
+  function sourceSection(title, items) {
+    const sec = document.createElement('div');
+    const head = document.createElement('div');
+    head.className = 'sources-head';
+    head.innerHTML = `<h2>${esc(title)}</h2><span class="count">${items.length}</span>`;
+    sec.appendChild(head);
+    if (items.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'src empty';
+      e.textContent = 'no matches';
+      sec.appendChild(e);
+    } else {
+      for (const it of items) {
+        const el = document.createElement('div');
+        el.className = 'src';
+        const cite = it.url
+          ? `<a href="${esc(it.url)}" target="_blank" rel="noopener" style="color:inherit">${esc(it.citation)}</a>`
+          : esc(it.citation);
+        el.innerHTML = `<div class="cite">${cite}</div><div class="summary">${esc(it.summary)}</div>`;
+        sec.appendChild(el);
+      }
+    }
+    return sec;
+  }
+  root.appendChild(sourceSection('Gloss — notebook pages', b.sources.gloss));
+  root.appendChild(sourceSection('Comms — messages & email', b.sources.comms));
+  root.appendChild(sourceSection('Black — archive', b.sources.black));
+
+  out.appendChild(root);
+  $('#print').disabled = false;
+}
+
+async function generate() {
+  if (state.busy) return;
+  const prompt = $('#prompt').value.trim();
+  if (!prompt) { $('#prompt').focus(); return; }
+  state.busy = true;
+  const btn = $('#go');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  $('#out').innerHTML = '<div class="card" style="color:var(--ink-muted);">Searching Gloss, Comms, and Black — and optionally asking Gemini for a synthesis. This takes ~20s.</div>';
+  try {
+    const res = await fetch('/api/research-briefing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, synthesize: $('#synth').checked }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    renderBriefing(await res.json());
+  } catch (err) {
+    $('#out').innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  } finally {
+    state.busy = false;
+    btn.disabled = false;
+    btn.textContent = 'Generate briefing';
+  }
+}
+
+$('#go').addEventListener('click', generate);
+$('#print').addEventListener('click', () => window.print());
+$('#prompt').addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate();
+});
+</script>
+</body>
+</html>

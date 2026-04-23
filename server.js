@@ -2091,6 +2091,115 @@ app.get('/api/search', (req, res) => {
   res.json(db.searchAll(q, 5));
 });
 
+// ── POST /api/research-briefing ─────────────────────────────────────────────
+// Primary use case: sermon prep. The user brain-dumps a topic/passage as text,
+// we search Gloss + Comms + Black for anything they've already captured on
+// it, and (optionally) ask Gemini to weave those fragments into a short
+// narrative. Output is consumed by /research.html which prints it clean.
+//
+// Voice input is handled client-side — the textarea supports iOS/browser
+// dictation natively, so no separate transcription endpoint is needed here.
+async function remoteSearch(url, apiKey, qs) {
+  if (!url || !apiKey) return null;
+  try {
+    const res = await fetch(`${url}${qs}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+app.post('/api/research-briefing', async (req, res) => {
+  const prompt = String(req.body?.prompt || '').trim();
+  const synthesize = req.body?.synthesize !== false; // default true
+  if (!prompt) return res.status(400).json({ error: 'prompt is required' });
+  if (prompt.length > 4000) return res.status(400).json({ error: 'prompt too long (max 4000 chars)' });
+
+  // Derive a concise search query from the prompt. Longer than ~120 chars and
+  // FTS gets noisy; we trim to the first sentence or clip.
+  const query = prompt.length > 120
+    ? (prompt.split(/[.!?]/)[0] || prompt).slice(0, 120)
+    : prompt;
+
+  // 1. Local Gloss search — pages + entities
+  let local;
+  try { local = db.searchAll(query, 20); }
+  catch (e) { local = { pages: [], collections: [], people: [], scripture: [], topics: [], books: [] }; }
+
+  // 2. Remote Comms + Black in parallel (best-effort — briefing still renders
+  //    if a sibling is down; missing sections just read as "no matches").
+  const q = encodeURIComponent(query);
+  const [commsData, blackData] = await Promise.all([
+    remoteSearch(process.env.COMMS_URL, process.env.COMMS_API_KEY, `/api/search?q=${q}&limit=15`),
+    remoteSearch(process.env.BLACK_URL, process.env.BLACK_API_KEY, `/api/search?q=${q}&k=15`),
+  ]);
+
+  // 3. Build citation-ready source list
+  const gloss_sources = (local.pages || []).map(p => ({
+    page_id: p.id,
+    kind: 'gloss-page',
+    citation: p.volume != null ? `Notebook ${p.volume}, page ${p.page_number ?? '?'}` : (p.captured_at?.slice(0, 10) || 'gloss page'),
+    summary: p.summary || '',
+    url: `/#/page/${p.id}`,
+  }));
+  const comms_sources = (commsData?.messages || []).slice(0, 10).map(m => ({
+    kind: 'comms-message',
+    citation: `Message — ${m.contact || 'unknown'} · ${m.sent_at?.slice(0, 10) || ''}`,
+    summary: (m.text || '').slice(0, 220),
+  })).concat(
+    (commsData?.emails || []).slice(0, 10).map(m => ({
+      kind: 'comms-email',
+      citation: `Email — ${m.contact || m.email_address || 'unknown'} · ${m.date?.slice(0, 10) || ''}`,
+      summary: `${m.subject || ''} — ${(m.snippet || '').slice(0, 180)}`,
+    })),
+  );
+  const black_sources = (blackData?.results || []).slice(0, 15).map(r => ({
+    kind: 'black-doc',
+    citation: r.title || r.path || r.file_id || 'archived document',
+    summary: (r.content || r.snippet || '').slice(0, 300),
+  }));
+
+  // 4. Optional LLM synthesis — Gemini weaves the sources into narrative.
+  // Cite-able context items use the same shape as the chat() helper so
+  // existing prompt wiring works. Narrative is skipped cleanly if the key
+  // is missing or synthesis times out.
+  let narrative = null;
+  let synthesis_error = null;
+  if (synthesize && process.env.GEMINI_API_KEY) {
+    const contextItems = [
+      ...(local.pages || []).map(p => ({
+        kind: 'gloss-page', text: p.summary || '',
+        volume: p.volume, page_number: p.page_number, page_id: p.id,
+      })),
+      ...comms_sources.map(s => ({ kind: s.kind, text: `${s.citation}: ${s.summary}`, page_id: null })),
+      ...black_sources.map(s => ({ kind: s.kind, text: `${s.citation}: ${s.summary}`, page_id: null })),
+    ];
+    try {
+      narrative = await chat(
+        `Prepare a research briefing on: ${prompt}\n\nSynthesize what I already know about this from my notebook, messages, and archive. Cite by index like [1], [2]. Be concise — this is a prep document, not a final essay.`,
+        contextItems,
+        db.getGlossary(),
+      );
+    } catch (e) { synthesis_error = e.message; }
+  }
+
+  res.json({
+    prompt,
+    query,
+    generated_at: new Date().toISOString(),
+    narrative,
+    synthesis_error,
+    sources: { gloss: gloss_sources, comms: comms_sources, black: black_sources },
+    counts: {
+      gloss: gloss_sources.length,
+      comms: comms_sources.length,
+      black: black_sources.length,
+    },
+  });
+});
+
 // ── POST /api/artifacts/:id/fetch ───────────────────────────────────────────
 // Re-run the Google fetch for an artifact. 400 if no external_url.
 app.post('/api/artifacts/:id/fetch', async (req, res) => {
