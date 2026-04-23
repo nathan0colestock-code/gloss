@@ -50,20 +50,16 @@ function buildContactsPayload() {
       .map(s => s.trim())
       .filter(Boolean);
 
-    // Per-page structured context. role_summary > person_mentions > summary;
-    // date comes from the daily_log if the page was filed to one, else the
-    // captured_at timestamp; collection is the first linked topical collection.
-    const recent_context = [];
-    const firstTopicalByPage = new Map();
-    for (const c of (p.collections || [])) {
-      if (c.kind && c.kind !== 'project' && c.kind !== 'monthly_log' && c.kind !== 'future_log') {
-        // We don't have per-page collection membership here, so we use the
-        // first topical collection as a rough caption for the person. Good
-        // enough for the nudge-context display.
-      }
-    }
-    const fallbackCollection = (p.collections || []).find(c => c && c.title)?.title || null;
+    // Prefer topical collections for captions; the generic-kinds (project,
+    // monthly/future_log) are structural and don't read well as "why is this
+    // person in your notebook" labels.
+    const topicalCollections = (p.collections || [])
+      .filter(c => c && c.title && (!c.kind || c.kind === 'topical'));
+    const fallbackCollection = topicalCollections[0]?.title || null;
 
+    // Per-page structured context. role_summary > summary; date comes from
+    // the daily_log if the page was filed to one, else the captured_at day.
+    const recent_context = [];
     for (const pg of (p.pages || []).slice(0, 5)) {
       const mentions = Array.isArray(pg.person_mentions) ? pg.person_mentions.filter(Boolean) : [];
       const role_summary = mentions[0] || pg.summary || null;
@@ -72,14 +68,13 @@ function buildContactsPayload() {
       recent_context.push({
         date,
         role_summary,
-        collection: firstTopicalByPage.get(pg.id) || fallbackCollection,
+        collection: fallbackCollection,
       });
     }
 
     // linked_collections: Comms UI renders these as plain chips (string titles).
-    const linked_collections = (p.collections || [])
-      .map(c => c.title)
-      .filter(Boolean);
+    // Topical-only so we don't leak project/monthly-log chrome.
+    const linked_collections = topicalCollections.map(c => c.title);
 
     payload.push({
       contact: p.label,

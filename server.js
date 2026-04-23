@@ -3161,7 +3161,7 @@ async function reexaminePageInBackground(pageId, newlyConfirmed) {
   }
 }
 
-// Free-form refine: user tells Foxed something it got wrong/missed; we re-examine
+// Free-form refine: user tells Gloss something it got wrong/missed; we re-examine
 app.post('/api/pages/:id/refine', async (req, res) => {
   const { hint } = req.body || {};
   if (!hint || !hint.trim()) return res.status(400).json({ error: 'hint is required' });
@@ -4414,7 +4414,7 @@ app.post('/api/comms/sync', async (req, res) => {
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Foxed running at http://localhost:${PORT}`);
+    console.log(`Gloss running at http://localhost:${PORT}`);
     try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
 
     if (google.isEnabled()) {
