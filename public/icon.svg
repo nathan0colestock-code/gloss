@@ -1,45 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <defs>
-    <filter id="page-shadow" x="-20%" y="-10%" width="140%" height="130%">
-      <feDropShadow dx="0" dy="8" stdDeviation="18" flood-color="#7a5c32" flood-opacity="0.32"/>
-    </filter>
-  </defs>
-
-  <!-- Tan background -->
-  <rect width="1024" height="1024" rx="224" fill="#C9A97A"/>
-
-  <!-- Page: bright cream, with prominent drop shadow to lift off tan bg -->
-  <rect x="222" y="128" width="556" height="756" rx="18" fill="#faf7f1" filter="url(#page-shadow)"/>
-
-  <!-- Margin rule: warm amber vertical line -->
-  <line x1="340" y1="172" x2="340" y2="860" stroke="#C07830" stroke-width="5" stroke-linecap="round"/>
-
-  <!-- Text lines — group 1 -->
-  <rect x="362" y="234" width="370" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="262" width="308" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="290" width="346" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="318" width="289" height="11" rx="5.5" fill="#c8c4bd"/>
-
-  <!-- Text lines — group 2 (annotated section) -->
-  <rect x="362" y="392" width="370" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="420" width="325" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="448" width="354" height="11" rx="5.5" fill="#c8c4bd"/>
-
-  <!-- Text lines — group 3 -->
-  <rect x="362" y="528" width="336" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="556" width="370" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="584" width="299" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="612" width="350" height="11" rx="5.5" fill="#c8c4bd"/>
-  <rect x="362" y="640" width="315" height="11" rx="5.5" fill="#c8c4bd"/>
-
-  <!-- Gloss mark: six-pointed asterisk in margin, aligned with group 2 -->
-  <!-- Center x = (222 + 340) / 2 = 281 -->
-  <g transform="translate(281,420)" stroke="#C07830" stroke-linecap="round" stroke-width="11" fill="none">
-    <line x1="0" y1="-32" x2="0" y2="32"/>
-    <line x1="-27.7" y1="-16" x2="27.7" y2="16"/>
-    <line x1="27.7" y1="-16" x2="-27.7" y2="16"/>
-  </g>
-
-  <!-- Tiny anchor dot in text at annotation point -->
-  <circle cx="355" cy="420" r="5" fill="#C07830"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#C9A97A"/>
+  <text x="512" y="512"
+        text-anchor="middle"
+        dominant-baseline="central"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+        font-weight="800"
+        font-size="720"
+        fill="#ffffff">G</text>
 </svg>
