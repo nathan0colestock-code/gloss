@@ -7,33 +7,116 @@
 <link rel="stylesheet" href="/fonts/foxed.css">
 <style>
 :root {
-  --paper:       #FAF7F1;
-  --paper-2:     #F3EEE3;
-  --paper-3:     #ECE4D2;
-  --paper-edge:  #E5DCC6;
-  --ink:         #1F1B16;
-  --ink-soft:    #5C5246;
-  --ink-faint:   #9D907D;
-  --rule:        #E5DCC6;
-  --rule-soft:   #EFE9DC;
-  --accent:      #8B3A1F;
-  --accent-dim:  #6F2E18;
-  --accent-soft: #E3C7BB;
-  --danger:      #7A2E22;
-  --ok:          #4C6B3F;
+  --paper:       #F9F8F6;
+  --paper-2:     #F2F0EC;
+  --paper-3:     #E9E6E0;
+  --paper-edge:  #E2DED8;
+  --surface:     #FFFFFF;
+  --ink:         #1C1917;
+  --ink-soft:    #57534E;
+  --ink-faint:   #A8A29E;
+  --rule:        #E7E5E0;
+  --rule-soft:   #F0EDE8;
+  --accent:      #C2410C;
+  --accent-dim:  #9A3412;
+  --accent-soft: #FFEDD5;
+  --danger:      #DC2626;
+  --ok:          #16A34A;
+  --ink-2:       #78716C;
+  --ink-3:       #A8A29E;
+  --ink-4:       #C7C0BA;
+  --border:      #E7E5E0;
 
   --font-sans:   "Inter", system-ui, -apple-system, sans-serif;
+  --font-serif:  ui-serif, Georgia, Cambria, 'Times New Roman', serif;
   --font-mono:   "JetBrains Mono", ui-monospace, Menlo, monospace;
 
-  --r-sm: 2px;
-  --r:    3px;
-  --r-lg: 5px;
-  --shadow-card:  0 1px 2px rgba(0,0,0,.04);
-  --shadow-lift:  0 8px 28px rgba(31,27,22,.12), 0 2px 8px rgba(31,27,22,.06);
-  --t: 180ms ease-out;
+  --r-sm: 4px;
+  --r:    6px;
+  --r-lg: 10px;
+  --shadow-sm:   0 1px 2px rgba(0,0,0,.06);
+  --shadow-card: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-lift: 0 8px 24px rgba(0,0,0,.10), 0 3px 8px rgba(0,0,0,.06), 0 0 0 1px rgba(0,0,0,.04);
+  --t: 160ms ease-out;
 
   --rail-w: 220px;
   --detail-w: 0px;
+}
+
+/* ── Dark mode ─────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:       #1C1917;
+    --paper-2:     #242019;
+    --paper-3:     #2E2924;
+    --paper-edge:  #3A342E;
+    --surface:     #201C18;
+    --ink:         #F5F2EE;
+    --ink-soft:    #B4ACA5;
+    --ink-faint:   #6B6560;
+    --ink-2:       #8C8681;
+    --ink-3:       #6B6560;
+    --ink-4:       #504A47;
+    --border:      #353028;
+    --rule:        #353028;
+    --rule-soft:   #2A2620;
+    --accent:      #EA580C;
+    --accent-dim:  #C2410C;
+    --accent-soft: #431407;
+    --danger:      #EF4444;
+    --ok:          #22C55E;
+    --shadow-sm:   0 1px 2px rgba(0,0,0,.30);
+    --shadow-card: 0 1px 3px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.25);
+    --shadow-lift: 0 8px 24px rgba(0,0,0,.50), 0 3px 8px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25);
+  }
+}
+html[data-theme="dark"] {
+  --paper:       #1C1917;
+  --paper-2:     #242019;
+  --paper-3:     #2E2924;
+  --paper-edge:  #3A342E;
+  --surface:     #201C18;
+  --ink:         #F5F2EE;
+  --ink-soft:    #B4ACA5;
+  --ink-faint:   #6B6560;
+  --ink-2:       #8C8681;
+  --ink-3:       #6B6560;
+  --ink-4:       #504A47;
+  --border:      #353028;
+  --rule:        #353028;
+  --rule-soft:   #2A2620;
+  --accent:      #EA580C;
+  --accent-dim:  #C2410C;
+  --accent-soft: #431407;
+  --danger:      #EF4444;
+  --ok:          #22C55E;
+  --shadow-sm:   0 1px 2px rgba(0,0,0,.30);
+  --shadow-card: 0 1px 3px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.25);
+  --shadow-lift: 0 8px 24px rgba(0,0,0,.50), 0 3px 8px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.25);
+}
+html[data-theme="light"] {
+  --paper:       #F9F8F6;
+  --paper-2:     #F2F0EC;
+  --paper-3:     #E9E6E0;
+  --paper-edge:  #E2DED8;
+  --surface:     #FFFFFF;
+  --ink:         #1C1917;
+  --ink-soft:    #57534E;
+  --ink-faint:   #A8A29E;
+  --ink-2:       #78716C;
+  --ink-3:       #A8A29E;
+  --ink-4:       #C7C0BA;
+  --border:      #E7E5E0;
+  --rule:        #E7E5E0;
+  --rule-soft:   #F0EDE8;
+  --accent:      #C2410C;
+  --accent-dim:  #9A3412;
+  --accent-soft: #FFEDD5;
+  --danger:      #DC2626;
+  --ok:          #16A34A;
+  --shadow-sm:   0 1px 2px rgba(0,0,0,.06);
+  --shadow-card: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-lift: 0 8px 24px rgba(0,0,0,.10), 0 3px 8px rgba(0,0,0,.06), 0 0 0 1px rgba(0,0,0,.04);
 }
 
 * { box-sizing: border-box; }
@@ -47,6 +130,7 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
@@ -132,7 +216,6 @@ body.rail-collapsed .nav-btn { justify-content: center; padding: 8px 0; gap: 0; 
 body.rail-collapsed .nav-btn .lbl { display: none; }
 
 #rail-footer {
-  margin-top: auto;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--ink-faint);
@@ -142,6 +225,28 @@ body.rail-collapsed .nav-btn .lbl { display: none; }
   transition: opacity 160ms;
 }
 body.rail-collapsed #rail-footer { opacity: 0; }
+
+#theme-toggle {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  color: var(--ink-faint);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 13px;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  margin-top: auto;
+  transition: color var(--t), background var(--t);
+}
+#theme-toggle:hover { color: var(--ink-soft); background: var(--paper-3); }
+#theme-toggle .ico { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.7; }
+#theme-toggle:hover .ico { opacity: 1; }
+#theme-toggle .lbl { transition: opacity 140ms; }
+body.rail-collapsed #theme-toggle { justify-content: center; padding: 8px 0; gap: 0; }
+body.rail-collapsed #theme-toggle .lbl { display: none; }
 
 /* Main */
 #main { flex: 1; min-width: 0; }
@@ -195,8 +300,8 @@ body.has-detail { --detail-w: min(58vw, 900px); }
 
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 8px;
-  border-radius: 3px;
+  padding: 3px 10px;
+  border-radius: 999px;
   background: var(--paper-2);
   border: 1px solid var(--rule);
   font-size: 12px;
@@ -205,10 +310,10 @@ body.has-detail { --detail-w: min(58vw, 900px); }
   line-height: 1.4;
   cursor: pointer;
 }
-.chip:hover { border-color: var(--ink-faint); color: var(--ink); background: var(--paper); }
-.chip.accent { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent-dim); }
-.chip .x { margin-left: 2px; opacity: 0.5; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 2px; }
-.chip .x:hover { opacity: 1; color: var(--danger); background: rgba(139,58,31,0.08); }
+.chip:hover { border-color: var(--ink-faint); color: var(--ink); background: var(--paper-3); }
+.chip.accent { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--accent-dim); }
+.chip .x { margin-left: 2px; opacity: 0.5; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 50%; }
+.chip .x:hover { opacity: 1; color: var(--danger); background: rgba(220,38,38,0.10); }
 .chip.kind-scripture { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; }
 
 .btn {
@@ -223,8 +328,8 @@ body.has-detail { --detail-w: min(58vw, 900px); }
   transition: all var(--t);
 }
 .btn:hover { border-color: var(--ink-faint); background: var(--paper-2); }
-.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+.btn.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--ink-soft); }
 .btn.ghost:hover { color: var(--ink); background: var(--paper-2); }
 .btn.sm { padding: 2px 7px; font-size: 11.5px; }
@@ -241,7 +346,7 @@ body.has-detail { --detail-w: min(58vw, 900px); }
 .input, textarea.input, select.input {
   width: 100%;
   padding: 7px 10px;
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: var(--r);
   transition: border-color var(--t), box-shadow var(--t);
@@ -249,8 +354,8 @@ body.has-detail { --detail-w: min(58vw, 900px); }
 }
 .input:focus, textarea.input:focus {
   outline: none;
-  border-color: var(--ink);
-  box-shadow: 0 0 0 3px rgba(31,27,22,0.08);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .input.mono { font-family: var(--font-mono); font-size: 12px; }
 
@@ -337,10 +442,11 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .cap-grid { display: flex; flex-direction: column; gap: 18px; }
 .cap-zone {
   border: 1px solid var(--rule);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   padding: 22px 24px;
-  background: var(--paper);
-  transition: border-color var(--t);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow var(--t);
 }
 .cap-zone h3 {
   margin: 0 0 4px;
@@ -362,13 +468,13 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .gc-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
 .gc-row:last-child { border-bottom: none; }
 .gc-row .gc-title { flex: 1; font-size: 13px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gc-row .gc-type { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.gc-row .gc-type { font-family: var(--font-sans); font-size: 11px; font-weight: 500; letter-spacing: 0; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .gc-row .gc-type.doc  { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .gc-row .gc-type.sheet { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 
 .drop-zone {
   border: 1.5px dashed var(--rule);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   padding: 30px 20px;
   text-align: center;
   color: var(--ink-faint);
@@ -403,6 +509,8 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 }
 .seg button.active { background: var(--paper); color: var(--ink); box-shadow: inset 0 -1px 0 var(--accent); }
 .seg button:hover:not(.active) { color: var(--ink); }
+.cap-type-bar { display: flex; width: 100%; }
+.cap-type-bar button { flex: 1; text-align: center; }
 
 .ingest-stream { margin-top: 16px; border-top: 1px solid var(--rule); padding-top: 16px; }
 .ingest-progress {
@@ -417,14 +525,15 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   gap: 14px;
   padding: 12px;
   border: 1px solid var(--rule);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   margin-bottom: 8px;
   animation: fadeIn 220ms ease-out;
-  background: var(--paper);
+  background: var(--surface);
   cursor: pointer;
-  transition: border-color var(--t);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--t), border-color var(--t);
 }
-.ingest-tile:hover { border-color: var(--ink-faint); }
+.ingest-tile:hover { border-color: var(--ink-faint); box-shadow: var(--shadow-card); }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .ingest-tile img { width: 80px; height: 80px; object-fit: cover; border-radius: var(--r-sm); background: var(--paper-3); }
 .ingest-tile .meta { flex: 1; min-width: 0; }
@@ -433,10 +542,11 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 
 .backlog-card {
   border: 1px solid var(--rule);
-  border-left: 2px solid var(--accent);
-  border-radius: var(--r);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-lg);
   padding: 14px 18px;
-  background: var(--paper);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 12px;
 }
 .backlog-card .q { font-size: 14.5px; color: var(--ink); margin-bottom: 10px; font-weight: 500; }
@@ -525,26 +635,14 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   color: var(--ink-faint);
   letter-spacing: 0.02em;
 }
-.tree-actions .btn { line-height: 1; }
-.tree-row { position: relative; }
-.tree-actions {
-  position: absolute;
-  right: 4px; top: 50%;
-  transform: translateY(-50%);
-  display: flex; gap: 2px; align-items: center;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--t);
-  background: var(--paper-2);
-  border-radius: var(--r);
-  padding: 0 2px;
-}
-.tree-row:hover .tree-actions, .tree-row.expanded .tree-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-.tree-actions .btn { padding: 2px 7px; font-size: 11px; border-color: transparent; }
-.tree-actions .btn:hover { border-color: var(--rule); }
+.tree-panel-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.tree-panel-actions .btn { padding: 2px 7px; font-size: 11px; border-color: transparent; color: var(--ink-soft); }
+.tree-panel-actions .btn:hover { border-color: var(--rule); color: var(--ink); }
+.tree-row.no-expand .tree-chevron { visibility: hidden; pointer-events: none; }
+.tree-row-actions { opacity: 0; pointer-events: none; transition: opacity var(--t); display: flex; gap: 4px; flex-shrink: 0; }
+.tree-row:hover .tree-row-actions { opacity: 1; pointer-events: auto; }
+.tree-row-actions .btn { padding: 1px 6px; font-size: 11px; border-color: transparent; color: var(--ink-soft); }
+.tree-row-actions .btn:hover { border-color: var(--rule); color: var(--ink); }
 
 .tree-children {
   margin-left: 10px;
@@ -556,8 +654,9 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   margin: 2px 0 8px 22px;
   padding: 8px 12px;
   border: 1px solid var(--rule);
-  border-radius: var(--r);
-  background: var(--paper);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
   font-size: 13px;
 }
 .tree-panel .section-label {
@@ -648,7 +747,7 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .scan-frame img { display: block; width: 100%; height: auto; cursor: zoom-in; transition: transform var(--t); }
 .scan-frame .rot-btn {
   position: absolute; top: 8px; right: 8px;
-  background: rgba(250, 247, 241, 0.9);
+  background: rgba(249, 248, 246, 0.92);
   border: 1px solid var(--rule);
   border-radius: var(--r);
   padding: 4px 10px;
@@ -790,17 +889,18 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 
 .day-tile {
   display: grid;
-  grid-template-columns: 100px 1fr;
+  grid-template-columns: 100px 1fr auto;
   gap: 14px;
   padding: 12px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r);
+  border: 1px solid transparent;
+  border-radius: var(--r-lg);
   margin-bottom: 10px;
-  background: var(--paper);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
   transition: all var(--t);
   cursor: pointer;
 }
-.day-tile:hover { border-color: var(--ink-faint); box-shadow: var(--shadow-card); }
+.day-tile:hover { border-color: var(--rule); box-shadow: var(--shadow-card); }
 .day-tile .thumb {
   width: 100px; height: 100px;
   background: var(--paper-3);
@@ -818,8 +918,11 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .day-tile .tile-body { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
 .day-tile .captions { font-size: 13.5px; color: var(--ink); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .day-tile .tile-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; letter-spacing: 0.02em; }
+.tile-del-btn { align-self: start; background: none; border: none; padding: 2px 4px; cursor: pointer; color: var(--ink-faint); font-size: 14px; line-height: 1; border-radius: var(--r); opacity: 0; transition: opacity var(--t), color var(--t); }
+.day-tile:hover .tile-del-btn { opacity: 1; }
+.tile-del-btn:hover { color: var(--danger, #c0392b); }
 .ctx-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-.ctx-badge { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.ctx-badge { font-family: var(--font-sans); font-size: 11px; font-weight: 500; letter-spacing: 0; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .ctx-badge.voice { background: color-mix(in srgb, var(--ink-soft) 12%, transparent); color: var(--ink-soft); }
 .ctx-badge.md { background: color-mix(in srgb, var(--ink-soft) 12%, transparent); color: var(--ink-soft); font-family: var(--font-mono); letter-spacing: 0.04em; }
 .ctx-badge.date { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); cursor: pointer; }
@@ -828,13 +931,30 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 .ctx-badge.artifact { background: color-mix(in srgb, var(--ok, #5C7A4D) 12%, transparent); color: var(--ok, #5C7A4D); }
 .ctx-badge.reference { background: color-mix(in srgb, var(--ink-soft) 15%, transparent); color: var(--ink-soft); }
 
+/* ── Artifact metadata preview ──────── */
+.artifact-meta-block { display: flex; flex-direction: column; gap: 12px; padding: 14px 24px 16px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.artifact-url-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.artifact-url-link { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 600; }
+.artifact-url-link:hover { text-decoration: underline; }
+.artifact-url-icon { font-size: 15px; line-height: 1; }
+.artifact-url-host { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-url-fetched { font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); }
+.artifact-url-error { font-family: var(--font-mono); font-size: 10px; color: var(--danger, #b91c1c); }
+.artifact-filing { display: flex; align-items: baseline; gap: 8px; }
+.artifact-filing-lbl { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.artifact-filing-path { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+.artifact-versions { display: flex; flex-direction: column; gap: 4px; }
+.artifact-versions-lbl { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 2px; }
+.artifact-version-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.artifact-linked { display: flex; flex-direction: column; gap: 6px; }
+
 /* ── Typeahead popover ──────────────── */
 .typeahead-pop {
   position: fixed;
   z-index: 100;
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--rule);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-lift);
   width: 340px;
   max-height: 380px;
@@ -908,8 +1028,8 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
   z-index: 300;
 }
 .toast {
-  padding: 9px 14px;
-  border-radius: var(--r);
+  padding: 9px 16px;
+  border-radius: var(--r-lg);
   background: var(--ink);
   color: var(--paper);
   font-size: 12.5px;
@@ -928,9 +1048,9 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 #cmdk-panel {
   position: relative;
   width: min(640px, 92vw);
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--rule);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-lift);
   display: flex; flex-direction: column;
   overflow: hidden;
@@ -1058,6 +1178,10 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
       <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
       <span class="lbl">Index</span>
     </button>
+    <button id="theme-toggle" title="Switch to dark mode">
+      <svg class="ico" id="theme-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <span class="lbl" id="theme-lbl">Dark mode</span>
+    </button>
     <div id="rail-footer">notebook · v1</div>
   </nav>
 
@@ -1093,6 +1217,17 @@ hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 16px 0; }
 
 <div id="toast-stack"></div>
 
+<script>
+// Runs before module script to avoid flash of wrong theme
+(function(){
+  var t = localStorage.getItem('foxed.theme');
+  if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else if (t === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
 <script type="module">
 // ─── util ──────────────────────────────────
 function h(tag, attrs, ...kids) {
@@ -1120,6 +1255,40 @@ const mainInner = document.getElementById('main-inner');
 const detail = document.getElementById('detail');
 const detailInner = document.getElementById('detail-inner');
 const detailScroll = document.getElementById('detail-scroll');
+
+// ─── theme ─────────────────────────────────
+function _isDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function renderThemeBtn() {
+  const ico = document.getElementById('theme-ico');
+  const lbl = document.getElementById('theme-lbl');
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  const dark = _isDark();
+  if (ico) ico.innerHTML = dark
+    // sun icon when dark (click to go light)
+    ? '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
+    // moon icon when light (click to go dark)
+    : '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  if (lbl) lbl.textContent = dark ? 'Light mode' : 'Dark mode';
+  btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+function toggleTheme() {
+  const next = _isDark() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('foxed.theme', next);
+  renderThemeBtn();
+}
+// Keep button in sync if the OS flips (only when user hasn't manually overridden)
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!localStorage.getItem('foxed.theme')) renderThemeBtn();
+});
+document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+renderThemeBtn();
 
 function toast(msg, kind = '') {
   const t = h('div', { class: `toast ${kind}` }, msg);
@@ -1610,7 +1779,7 @@ function openBlankDay(date) {
   openDetail();
 }
 
-async function openDayDetail(id) {
+async function openDayDetail(id, { skipRedirect = false } = {}) {
   detailInner.innerHTML = '';
   detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
   openDetail();
@@ -1633,6 +1802,13 @@ async function openDayDetail(id) {
     const key = p.scan_path || `p:${p.id}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
+  }
+
+  if (groups.size === 1 && !skipRedirect) {
+    const first = groups.values().next().value[0];
+    detailBackContext = { label: dateLabel(date), action: () => openDayDetail(id, { skipRedirect: true }) };
+    openPageDetail(first.id);
+    return;
   }
 
   detailInner.innerHTML = '';
@@ -1672,13 +1848,23 @@ async function openDayDetail(id) {
       const caps = group.map(p => p.summary || '').filter(Boolean).join(' · ') || '(no summary)';
       const meta = group.map(p => p.volume && p.page_number ? `v.${p.volume} p.${p.page_number}` : '').filter(Boolean).join(' · ');
       const tag = isVoice ? ' · voice' : (isMarkdown ? ' · markdown' : '');
+      const delBtn = h('button', { class: 'tile-del-btn', title: 'Delete' }, '×');
       const tile = h('div', { class: 'day-tile' },
         thumb,
         h('div', { class: 'tile-body' },
           h('div', { class: 'captions' }, caps),
           h('div', { class: 'tile-meta' }, `${group.length} page${group.length > 1 ? 's' : ''}${tag}${meta ? ' · ' + meta : ''}`),
         ),
+        delBtn,
       );
+      delBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Delete this page? It will be hidden but not permanently removed.')) return;
+        try {
+          await Promise.all(group.map(p => api(`/api/pages/${p.id}`, 'DELETE')));
+          tile.remove();
+        } catch (err) { toast(err.message, 'err'); }
+      });
       tile.addEventListener('click', () => {
         detailBackContext = { label: dateLabel(date), action: () => openDayDetail(id) };
         openPageDetail(first.id);
@@ -1767,10 +1953,23 @@ function renderPageDetail(p) {
     h('div', { class: 'title' }, title),
     h('div', { class: 'sub' }, p.captured_at ? new Date(p.captured_at).toLocaleString() : ''),
   );
+  const deletePage = async () => {
+    if (!confirm('Delete this page? It will be hidden but not permanently removed.')) return;
+    try {
+      await api(`/api/pages/${p.id}`, 'DELETE');
+      const ctx = detailBackContext;
+      detailBackContext = null;
+      closeDetail();
+      if (ctx) ctx.action();
+    } catch (err) { toast(err.message, 'err'); }
+  };
   detailInner.append(
     h('div', { class: 'detail-head' },
       headLeft,
-      h('button', { class: 'icon-btn', onclick: () => { detailBackContext = null; closeDetail(); }, title: 'Close' }, '×'),
+      h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+        h('button', { class: 'btn ghost sm', onclick: deletePage, title: 'Delete page' }, 'Delete'),
+        h('button', { class: 'icon-btn', onclick: () => { detailBackContext = null; closeDetail(); }, title: 'Close' }, '×'),
+      ),
     ),
   );
 
@@ -1942,239 +2141,250 @@ function renderPageDetail(p) {
 let backlogState = { queue: [], idx: 0, container: null };
 
 async function renderCapture() {
-  mainInner.appendChild(h('div', { class: 'surface-head' },
-    h('h1', { class: 'surface-title' }, 'Capture'),
-    h('div', { class: 'surface-sub' }, 'Scans, URLs, files, voice memos.'),
-  ));
-  const grid = h('div', { class: 'cap-grid' });
-  mainInner.appendChild(grid);
+  let googleOpen = localStorage.getItem('gloss.cap.googleOpen') === 'true';
 
-  // Google auto-capture: pending queue (connected only) + settings (always shown)
+  const googleToggleBtn = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 9px', flexShrink: 0 } },
+    googleOpen ? '⚙ Google ▲' : '⚙ Google');
+  mainInner.appendChild(h('div', { class: 'surface-head', style: { alignItems: 'flex-start' } },
+    h('div', null,
+      h('h1', { class: 'surface-title' }, 'Capture'),
+      
+    ),
+    googleToggleBtn,
+  ));
+
+  const typeLabels = ['Notebook', 'Artifact', 'Reference'];
+  const typeBar    = h('div', { class: 'seg cap-type-bar', style: { marginBottom: '14px' } });
+  const inputZone  = h('div', { class: 'cap-zone' });
+  const streamHost = h('div');
+
+  typeLabels.forEach(label => {
+    const btn = h('button', { class: label === 'Notebook' ? 'active' : '' }, label);
+    btn.addEventListener('click', () => switchType(label));
+    typeBar.appendChild(btn);
+  });
+
+  function switchType(t) {
+    typeBar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.textContent === t));
+    inputZone.innerHTML = '';
+    if (t === 'Notebook') renderNotebookPanel();
+    else renderFilePanel(t.toLowerCase());
+  }
+
+  function renderNotebookPanel() {
+    const volumeIn  = h('input', { class: 'input', placeholder: 'e.g. D or 4', style: { maxWidth: '120px' } });
+    const fileInput = h('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
+    const drop = h('div', { class: 'drop-zone' },
+      h('div', { class: 'big' }, 'Drop a scan here'),
+      h('div', { style: { marginTop: '6px', fontSize: '12px' } }, 'or ', h('span', { class: 'kbd' }, 'click'), ' to choose'),
+    );
+    const doIngest = f => startScanIngest(f, 'page', streamHost, { volume: volumeIn.value.trim() });
+    drop.addEventListener('click', () => fileInput.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('drag'); const f = e.dataTransfer.files?.[0]; if (f) doIngest(f); });
+    fileInput.addEventListener('change', () => { const f = fileInput.files?.[0]; if (f) doIngest(f); });
+    inputZone.append(
+      h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Volume (optional)'),
+      volumeIn,
+      h('div', { style: { marginTop: '12px' } }, drop, fileInput),
+    );
+  }
+
+  function makeCollectionPicker() {
+    let selected = null;
+    const btn  = h('button', { class: 'btn ghost', style: { fontSize: '12px' } }, '+ Link to collection');
+    const chip = h('div', { style: { display: 'none', marginTop: '4px' } });
+    btn.addEventListener('click', () => {
+      openTypeahead({ anchor: btn, kinds: ['collection'], placeholder: 'Search collections…', allowCreate: false,
+        onPick: item => {
+          selected = item; btn.style.display = 'none'; chip.style.display = '';
+          chip.innerHTML = '';
+          chip.appendChild(h('span', { class: 'chip' }, item.label,
+            Object.assign(h('span', { class: 'x' }, '×'), { onclick: () => { selected = null; chip.style.display = 'none'; btn.style.display = ''; } })
+          ));
+        },
+      });
+    });
+    return { btn, chip, get: () => selected };
+  }
+
+  function makeDayPicker() {
+    const wrap  = h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } });
+    const input = h('input', { type: 'date', class: 'input', style: { maxWidth: '160px' } });
+    const clear = h('button', { class: 'btn ghost', style: { fontSize: '11px', padding: '2px 6px' } }, '×');
+    clear.addEventListener('click', () => { input.value = ''; });
+    wrap.append(input, clear);
+    return { wrap, get: () => input.value || null };
+  }
+
+  function renderFilePanel(kind) {
+    const titleIn = h('input', { class: 'input', placeholder: 'Title' });
+    const urlIn   = h('input', { class: 'input', placeholder: 'https://…', style: { marginTop: '8px' } });
+    const fileIn  = h('input', { type: 'file', style: { marginTop: '8px' } });
+    const coll    = makeCollectionPicker();
+    const day     = makeDayPicker();
+    const saveBtn = h('button', { class: 'btn primary', style: { marginTop: '14px' } }, 'Save');
+
+    saveBtn.addEventListener('click', async () => {
+      const t = titleIn.value.trim();
+      if (!t) { toast('Title required', 'err'); return; }
+      const endpoint = kind === 'artifact' ? '/api/artifacts' : '/api/references';
+      saveBtn.disabled = true;
+      try {
+        let result;
+        if (fileIn.files?.[0]) {
+          const fd = new FormData();
+          fd.append('file', fileIn.files[0]);
+          fd.append('title', t);
+          if (urlIn.value.trim()) fd.append('external_url', urlIn.value.trim());
+          const res = await fetch(endpoint, { method: 'POST', body: fd });
+          if (!res.ok) throw new Error((await res.json()).error || 'upload failed');
+          result = await res.json();
+        } else {
+          result = await api(endpoint, 'POST', { title: t, external_url: urlIn.value.trim() || null });
+        }
+        const sel = coll.get();
+        if (sel && result?.id) {
+          await api(`/api/${kind}s/${result.id}/links`, 'POST', { to_type: 'collection', to_id: sel.id });
+        }
+        const date = day.get();
+        if (date && result?.id) {
+          const dl = await api('/api/daily-logs', 'POST', { date });
+          await api('/api/links', 'POST', { from_type: kind, from_id: result.id, to_type: 'daily_log', to_id: dl.id });
+        }
+        toast(`${kind} saved`, 'ok');
+        titleIn.value = ''; urlIn.value = ''; fileIn.value = '';
+      } catch (err) { toast(err.message, 'err'); }
+      finally { saveBtn.disabled = false; }
+    });
+
+    inputZone.append(
+      h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Title'),
+      titleIn,
+      h('div', { class: 'lbl-mono', style: { marginTop: '10px', marginBottom: '4px' } }, 'URL (optional)'),
+      urlIn,
+      h('div', { class: 'lbl-mono', style: { marginTop: '10px', marginBottom: '4px' } }, 'File (optional)'),
+      fileIn,
+      h('div', { style: { marginTop: '12px' } }, coll.btn, coll.chip),
+      h('div', { style: { marginTop: '10px' } },
+        h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Day (optional)'),
+        day.wrap,
+      ),
+      saveBtn,
+    );
+  }
+
+  mainInner.append(typeBar, inputZone, streamHost);
+  switchType('Notebook');
+
+  // Notes — permanent section below the main input
+  mainInner.appendChild(h('div', { style: { borderTop: '1px solid var(--rule)', margin: '28px 0 0' } }));
+  const notesHead = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '14px 0 6px' } },
+    h('span', { class: 'lbl-mono', style: { fontSize: '11px', letterSpacing: '0.06em' } }, 'NOTES'),
+    h('button', { class: 'btn' }, '+ New note'),
+  );
+  const draftListEl = h('div', { class: 'md-draft-list' });
+  notesHead.querySelector('button').addEventListener('click', async () => {
+    const draft = await api('/api/markdown-drafts', 'POST', { content: '', date: todayIso() });
+    await refreshDraftList(draftListEl, streamHost);
+    openDraftDetail(draft.id, draftListEl, streamHost);
+  });
+  mainInner.append(notesHead, draftListEl);
+  refreshDraftList(draftListEl, streamHost);
+
+  // Google — collapsible, toggled by the ⚙ button in the header
   let gStatus = null;
   try { gStatus = await api('/api/google/status'); } catch {}
   const gConnected = !!(gStatus && gStatus.connected);
+  const googleSection = h('div', { style: { marginTop: '16px' } });
+  mainInner.appendChild(googleSection);
 
-  if (gConnected) {
-    const { items: pendingCaptures } = await api('/api/google/captures');
-    if (pendingCaptures.length > 0) {
-      const gcZone = h('div', { class: 'cap-zone' });
-      const checkBtn = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 10px' } }, 'Check now');
-      checkBtn.addEventListener('click', async () => {
-        checkBtn.disabled = true; checkBtn.textContent = 'Checking…';
-        try {
-          await api('/api/google/poll', 'POST');
-          mainInner.innerHTML = ''; await renderCapture();
-        } catch (e) { toast(e.message, 'err'); checkBtn.disabled = false; checkBtn.textContent = 'Check now'; }
-      });
-      gcZone.appendChild(h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' } },
-        h('h3', null, 'New from Google'), checkBtn));
-      gcZone.appendChild(h('div', { class: 'sub' }, 'Recently created Docs and Sheets — classify each to save it.'));
-      const captureList = h('div');
-      for (const item of pendingCaptures) {
-        const isSheet = item.mime_type.includes('spreadsheet');
-        const row = h('div', { class: 'gc-row' });
-        const badge = h('span', { class: `gc-type ${isSheet ? 'sheet' : 'doc'}` }, isSheet ? 'Sheet' : 'Doc');
-        const titleLink = h('a', { class: 'gc-title', href: item.file_url, target: '_blank', rel: 'noopener' }, item.title);
-        const refBtn = h('button', { class: 'btn', style: { fontSize: '12px', padding: '3px 10px' } }, 'Reference');
-        const artBtn = h('button', { class: 'btn', style: { fontSize: '12px', padding: '3px 10px' } }, 'Artifact');
-        const dimBtn = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 8px' } }, '✕');
-        const doAccept = async (kind) => {
-          refBtn.disabled = artBtn.disabled = dimBtn.disabled = true;
-          try {
-            await api(`/api/google/captures/${item.id}/accept`, 'POST', { kind });
-            toast(`${kind} saved`, 'ok');
-            mainInner.innerHTML = ''; await renderCapture();
-          } catch (e) { toast(e.message, 'err'); refBtn.disabled = artBtn.disabled = dimBtn.disabled = false; }
-        };
-        refBtn.addEventListener('click', () => doAccept('reference'));
-        artBtn.addEventListener('click', () => doAccept('artifact'));
-        dimBtn.addEventListener('click', async () => {
-          refBtn.disabled = artBtn.disabled = dimBtn.disabled = true;
-          try {
-            await api(`/api/google/captures/${item.id}/dismiss`, 'POST');
-            mainInner.innerHTML = ''; await renderCapture();
-          } catch (e) { toast(e.message, 'err'); refBtn.disabled = artBtn.disabled = dimBtn.disabled = false; }
+  const renderGoogleSection = async () => {
+    googleSection.innerHTML = '';
+    if (!googleOpen) return;
+
+    if (gConnected) {
+      const { items: pendingCaptures } = await api('/api/google/captures');
+      if (pendingCaptures.length > 0) {
+        const gcZone = h('div', { class: 'cap-zone', style: { marginBottom: '12px' } });
+        const checkBtn = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 10px' } }, 'Check now');
+        checkBtn.addEventListener('click', async () => {
+          checkBtn.disabled = true; checkBtn.textContent = 'Checking…';
+          try { await api('/api/google/poll', 'POST'); mainInner.innerHTML = ''; await renderCapture(); }
+          catch (e) { toast(e.message, 'err'); checkBtn.disabled = false; checkBtn.textContent = 'Check now'; }
         });
-        row.append(badge, titleLink, refBtn, artBtn, dimBtn);
-        captureList.appendChild(row);
+        gcZone.appendChild(h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' } },
+          h('h3', null, 'New from Google'), checkBtn));
+        gcZone.appendChild(h('div', { class: 'sub' }, 'Recently created Docs and Sheets — classify each to save it.'));
+        const captureList = h('div');
+        for (const item of pendingCaptures) {
+          const isSheet = item.mime_type.includes('spreadsheet');
+          const row = h('div', { class: 'gc-row' });
+          const badge    = h('span', { class: `gc-type ${isSheet ? 'sheet' : 'doc'}` }, isSheet ? 'Sheet' : 'Doc');
+          const titleLink = h('a', { class: 'gc-title', href: item.file_url, target: '_blank', rel: 'noopener' }, item.title);
+          const refBtn   = h('button', { class: 'btn', style: { fontSize: '12px', padding: '3px 10px' } }, 'Reference');
+          const artBtn   = h('button', { class: 'btn', style: { fontSize: '12px', padding: '3px 10px' } }, 'Artifact');
+          const dimBtn   = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 8px' } }, '✕');
+          const doAccept = async (k) => {
+            refBtn.disabled = artBtn.disabled = dimBtn.disabled = true;
+            try { await api(`/api/google/captures/${item.id}/accept`, 'POST', { kind: k }); toast(`${k} saved`, 'ok'); mainInner.innerHTML = ''; await renderCapture(); }
+            catch (e) { toast(e.message, 'err'); refBtn.disabled = artBtn.disabled = dimBtn.disabled = false; }
+          };
+          refBtn.addEventListener('click', () => doAccept('reference'));
+          artBtn.addEventListener('click', () => doAccept('artifact'));
+          dimBtn.addEventListener('click', async () => {
+            refBtn.disabled = artBtn.disabled = dimBtn.disabled = true;
+            try { await api(`/api/google/captures/${item.id}/dismiss`, 'POST'); mainInner.innerHTML = ''; await renderCapture(); }
+            catch (e) { toast(e.message, 'err'); refBtn.disabled = artBtn.disabled = dimBtn.disabled = false; }
+          });
+          row.append(badge, titleLink, refBtn, artBtn, dimBtn);
+          captureList.appendChild(row);
+        }
+        gcZone.appendChild(captureList);
+        googleSection.appendChild(gcZone);
       }
-      gcZone.appendChild(captureList);
-      grid.appendChild(gcZone);
     }
-  }
 
-  {
     const driveConfig = gConnected ? await api('/api/google/drive-config') : {};
     const settingsZone = h('div', { class: 'cap-zone' });
     settingsZone.appendChild(h('h3', null, 'Google auto-capture'));
     if (!gConnected) {
       settingsZone.appendChild(h('div', { class: 'sub' }, 'Connect your Google account to auto-capture new Docs, Sheets, and Drive folder scans.'));
-      const connectBtn = h('a', { class: 'btn primary', href: '/api/google/connect', style: { display: 'inline-block', marginTop: '8px' } }, 'Connect Google');
-      settingsZone.appendChild(connectBtn);
+      settingsZone.appendChild(h('a', { class: 'btn primary', href: '/api/google/connect', style: { display: 'inline-block', marginTop: '8px' } }, 'Connect Google'));
     } else {
-      settingsZone.appendChild(h('div', { class: 'sub' }, 'Images and PDFs dropped in these Drive folders are ingested automatically. New Docs/Sheets anywhere in Drive appear in the queue above.'));
+      settingsZone.appendChild(h('div', { class: 'sub' }, 'Images and PDFs dropped in these Drive folders are ingested automatically.'));
       const parseFolderId = v => { if (!v) return null; const m = v.match(/\/folders\/([a-zA-Z0-9_-]{10,})/); return m ? m[1] : v.trim() || null; };
       const scanFolderIn = h('input', { class: 'input', placeholder: 'Notebook scans folder URL or ID', value: driveConfig.scan_folder_id || '' });
-      const refFolderIn  = h('input', { class: 'input', placeholder: 'Reference scans folder URL or ID',  value: driveConfig.reference_folder_id || '' });
+      const refFolderIn  = h('input', { class: 'input', placeholder: 'Reference scans folder URL or ID', value: driveConfig.reference_folder_id || '' });
       const pollNowBtn   = h('button', { class: 'btn ghost', style: { fontSize: '12px', padding: '3px 10px' } }, 'Check now');
-      const folderSave   = h('button', { class: 'btn primary' }, 'Save folder settings');
+      const folderSave   = h('button', { class: 'btn primary' }, 'Save');
       pollNowBtn.addEventListener('click', async () => {
         pollNowBtn.disabled = true; pollNowBtn.textContent = 'Checking…';
-        try { await api('/api/google/poll', 'POST'); toast('Polled for new files', 'ok'); mainInner.innerHTML = ''; await renderCapture(); }
+        try { await api('/api/google/poll', 'POST'); toast('Polled', 'ok'); mainInner.innerHTML = ''; await renderCapture(); }
         catch (e) { toast(e.message, 'err'); pollNowBtn.disabled = false; pollNowBtn.textContent = 'Check now'; }
       });
       folderSave.addEventListener('click', async () => {
-        try {
-          await api('/api/google/drive-config', 'PATCH', { scan_folder_id: parseFolderId(scanFolderIn.value), reference_folder_id: parseFolderId(refFolderIn.value) });
-          toast('Folder settings saved', 'ok');
-        } catch (e) { toast(e.message, 'err'); }
+        try { await api('/api/google/drive-config', 'PATCH', { scan_folder_id: parseFolderId(scanFolderIn.value), reference_folder_id: parseFolderId(refFolderIn.value) }); toast('Saved', 'ok'); }
+        catch (e) { toast(e.message, 'err'); }
       });
       settingsZone.append(
-        h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Notebook scans folder'),
-        scanFolderIn,
-        h('div', { class: 'lbl-mono', style: { margin: '10px 0 4px' } }, 'Reference scans folder'),
-        refFolderIn,
-        h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px', alignItems: 'center' } }, folderSave, pollNowBtn),
+        h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Notebook scans folder'), scanFolderIn,
+        h('div', { class: 'lbl-mono', style: { margin: '10px 0 4px' } }, 'Reference scans folder'), refFolderIn,
+        h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px' } }, folderSave, pollNowBtn),
       );
     }
-    grid.appendChild(settingsZone);
-  }
+    googleSection.appendChild(settingsZone);
+  };
 
-  // Scan
-  const scanZone = h('div', { class: 'cap-zone' });
-  scanZone.appendChild(h('h3', null, 'Scan'));
-  scanZone.appendChild(h('div', { class: 'sub' }, 'Drag a notebook image or PDF. Multi-page PDFs stream in as they parse.'));
-  const fileInput = h('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
-  const drop = h('div', { class: 'drop-zone' },
-    h('div', { class: 'big' }, 'Drop a scan here'),
-    h('div', { style: { marginTop: '6px', fontSize: '12px' } }, 'or ', h('span', { class: 'kbd' }, 'click'), ' to choose'),
-  );
-  drop.addEventListener('click', () => fileInput.click());
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
-  drop.addEventListener('drop', async e => {
-    e.preventDefault(); drop.classList.remove('drag');
-    const f = e.dataTransfer.files?.[0];
-    if (f) startScanIngest(f, kindSeg.value, streamHost);
-  });
-  fileInput.addEventListener('change', () => {
-    const f = fileInput.files?.[0];
-    if (f) startScanIngest(f, kindSeg.value, streamHost);
-  });
-  scanZone.append(drop, fileInput);
-
-  const kinds = ['page', 'book', 'artifact', 'reference'];
-  const kindSeg = { value: 'page' };
-  const seg = h('div', { class: 'seg', style: { marginTop: '12px' } });
-  kinds.forEach(k => {
-    const b = h('button', { class: k === 'page' ? 'active' : '' }, k);
-    b.addEventListener('click', () => {
-      seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      kindSeg.value = k;
-    });
-    seg.appendChild(b);
-  });
-  scanZone.appendChild(h('div', { class: 'lbl-mono', style: { marginTop: '14px', marginBottom: '4px' } }, 'Hint'));
-  scanZone.appendChild(seg);
-  const streamHost = h('div');
-  scanZone.appendChild(streamHost);
-  grid.appendChild(scanZone);
-
-  // URL or file
-  const urlZone = h('div', { class: 'cap-zone' });
-  urlZone.appendChild(h('h3', null, 'URL or file'));
-  urlZone.appendChild(h('div', { class: 'sub' }, 'Paste a Google Docs/Drive URL or upload a file. Default: reference (something to consult). Toggle to artifact for completed outputs.'));
-  const kindRefArt = { value: 'reference' };
-  const refSeg = h('div', { class: 'seg' });
-  ['reference', 'artifact'].forEach(k => {
-    const b = h('button', { class: k === 'reference' ? 'active' : '' }, k);
-    b.addEventListener('click', () => {
-      refSeg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      kindRefArt.value = k;
-    });
-    refSeg.appendChild(b);
-  });
-  const title = h('input', { class: 'input', placeholder: 'Title', style: { marginTop: '12px' } });
-  const url = h('input', { class: 'input', placeholder: 'https://docs.google.com/…', style: { marginTop: '8px' } });
-  const fileIn = h('input', { type: 'file', style: { marginTop: '8px' } });
-  const urlSubmit = h('button', { class: 'btn primary', style: { marginTop: '12px' } }, 'Save');
-  urlSubmit.addEventListener('click', async () => {
-    const t = title.value.trim();
-    if (!t) { toast('Title required', 'err'); return; }
-    const endpoint = kindRefArt.value === 'artifact' ? '/api/artifacts' : '/api/references';
-    try {
-      if (fileIn.files?.[0]) {
-        const fd = new FormData();
-        fd.append('file', fileIn.files[0]);
-        fd.append('title', t);
-        if (url.value.trim()) fd.append('external_url', url.value.trim());
-        const res = await fetch(endpoint, { method: 'POST', body: fd });
-        if (!res.ok) throw new Error((await res.json()).error || 'upload failed');
-      } else {
-        await api(endpoint, 'POST', { title: t, external_url: url.value.trim() || null });
-      }
-      toast(`${kindRefArt.value} saved`, 'ok');
-      title.value = ''; url.value = ''; fileIn.value = '';
-    } catch (err) { toast(err.message, 'err'); }
-  });
-  urlZone.append(
-    h('div', { class: 'lbl-mono', style: { marginBottom: '4px' } }, 'Kind'),
-    refSeg, title, url, fileIn, urlSubmit,
-  );
-  grid.appendChild(urlZone);
-
-  // Voice
-  const voiceZone = h('div', { class: 'cap-zone' });
-  voiceZone.appendChild(h('h3', null, 'Voice memo'));
-  voiceZone.appendChild(h('div', { class: 'sub' }, 'Paste a transcript. Parsed into pointer-summaries and filed to the day.'));
-  const vDate = h('input', { type: 'date', class: 'input', value: todayIso(), style: { maxWidth: '180px' } });
-  const vText = h('textarea', { class: 'input', rows: 6, placeholder: '"Met with Jake this morning — he asked about the sermon series on sabbath. I pointed him to…"', style: { marginTop: '10px' } });
-  const vBtn = h('button', { class: 'btn primary', style: { marginTop: '12px' } }, 'File voice memo');
-  vBtn.addEventListener('click', async () => {
-    const t = vText.value.trim();
-    if (!t) { toast('Nothing to file', 'err'); return; }
-    try {
-      vBtn.disabled = true;
-      await api('/api/ingest/voice', 'POST', { transcript: t, date: vDate.value });
-      toast(`Filed to ${vDate.value}`, 'ok');
-      vText.value = '';
-      await loadBacklog(streamHost);
-    } catch (err) { toast(err.message, 'err'); }
-    finally { vBtn.disabled = false; }
-  });
-  voiceZone.append(
-    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
-      h('span', { class: 'lbl-mono' }, 'Date'),
-      vDate,
-    ),
-    vText, vBtn,
-  );
-  grid.appendChild(voiceZone);
-
-  // Markdown drafts — list of uncommitted notes. Clicking a row opens the editor
-  // in the right-side detail panel. Committed notes are immutable (parsed by Gemini).
-  const mdZone = h('div', { class: 'cap-zone' });
-  mdZone.appendChild(h('h3', null, 'Markdown'));
-  mdZone.appendChild(h('div', { class: 'sub' }, 'Write notes in markdown. Drafts are editable until committed — committing parses them like a scan and files them permanently.'));
-
-  const newDraftBtn = h('button', { class: 'btn' }, '+ New note');
-  const draftList = h('div', { class: 'md-draft-list' });
-
-  async function loadMdDrafts() {
-    await refreshDraftList(draftList, streamHost);
-  }
-
-  newDraftBtn.addEventListener('click', async () => {
-    const draft = await api('/api/markdown-drafts', 'POST', { content: '', date: todayIso() });
-    await refreshDraftList(draftList, streamHost);
-    openDraftDetail(draft.id, draftList, streamHost);
+  googleToggleBtn.addEventListener('click', () => {
+    googleOpen = !googleOpen;
+    localStorage.setItem('gloss.cap.googleOpen', String(googleOpen));
+    googleToggleBtn.textContent = googleOpen ? '⚙ Google ▲' : '⚙ Google';
+    renderGoogleSection();
   });
 
-  mdZone.append(newDraftBtn, draftList);
-  grid.appendChild(mdZone);
-  loadMdDrafts();
+  renderGoogleSection();
 }
 
 async function refreshDraftList(listEl, backlogHost) {
@@ -2238,21 +2448,43 @@ function openDraftDetail(draftId, listEl, backlogHost) {
     ta.addEventListener('blur', save);
     dateIn.addEventListener('change', save);
 
-    // Collection picker — optional, chosen before commit
-    let selectedCollection = null; // { id, label }
-    const collBtn = h('button', { class: 'btn', style: { maxWidth: '100%', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, 'None');
-    collBtn.addEventListener('click', () => {
-      openTypeahead({
-        anchor: collBtn,
-        kinds: ['collection'],
-        allowCreate: false,
-        placeholder: 'Search collections…',
-        onPick: (item) => {
-          if (item) { selectedCollection = { id: item.id, label: item.label }; collBtn.textContent = item.label; }
-          else { selectedCollection = null; collBtn.textContent = 'None'; }
-        },
-      });
+    // Filing mode: daily log (default) or create a new collection from the note title
+    let filingMode = 'daily_log';
+    const extractNoteTitle = () => {
+      const lines = (ta.value || '').split('\n').filter(l => l.trim());
+      return (lines[0] || '').replace(/^#+\s*/, '').trim() || 'Untitled note';
+    };
+
+    const fileModeBar = h('div', { class: 'seg', style: { marginTop: '14px' } });
+    const dlBtn  = h('button', { class: 'active' }, 'Daily log');
+    const colBtn = h('button', {}, 'New collection');
+    fileModeBar.append(dlBtn, colBtn);
+
+    const filingDetail = h('div', { style: { marginTop: '8px' } });
+    const renderFilingDetail = () => {
+      filingDetail.innerHTML = '';
+      if (filingMode === 'daily_log') {
+        filingDetail.appendChild(h('div', { style: { fontSize: '11.5px', color: 'var(--ink-soft)', fontFamily: 'var(--font-mono)' } }, 'Filed under the date above.'));
+      } else {
+        const titleIn = h('input', { class: 'input', value: extractNoteTitle(), placeholder: 'Collection title' });
+        filingDetail.append(
+          h('div', { class: 'lbl-mono', style: { marginBottom: '4px', fontSize: '11px' } }, 'Collection title'),
+          titleIn,
+        );
+      }
+    };
+
+    dlBtn.addEventListener('click', () => {
+      filingMode = 'daily_log';
+      dlBtn.classList.add('active'); colBtn.classList.remove('active');
+      renderFilingDetail();
     });
+    colBtn.addEventListener('click', () => {
+      filingMode = 'collection';
+      colBtn.classList.add('active'); dlBtn.classList.remove('active');
+      renderFilingDetail();
+    });
+    renderFilingDetail();
 
     const commitBtn = h('button', { class: 'btn primary' }, 'Commit');
     const discardBtn = h('button', { class: 'btn' }, 'Discard');
@@ -2263,10 +2495,16 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       commitBtn.disabled = true; commitBtn.textContent = 'Parsing…';
       try {
         await save();
-        const res = await api('/api/markdown-drafts/' + draft.id + '/commit', 'POST', {
-          collection_id: selectedCollection ? selectedCollection.id : null,
-        });
-        toast(`Filed to ${dateIn.value}`, 'ok');
+        let collectionId = null;
+        if (filingMode === 'collection') {
+          const titleIn = filingDetail.querySelector('input');
+          const collTitle = titleIn ? titleIn.value.trim() : extractNoteTitle();
+          if (!collTitle) { toast('Collection title required', 'err'); commitBtn.disabled = false; commitBtn.textContent = 'Commit'; return; }
+          const newColl = await api('/api/collections', 'POST', { title: collTitle, kind: 'topical' });
+          collectionId = newColl.id;
+        }
+        const res = await api('/api/markdown-drafts/' + draft.id + '/commit', 'POST', { collection_id: collectionId });
+        toast(filingMode === 'collection' ? 'Filed as collection' : `Filed to ${dateIn.value}`, 'ok');
         closeDetail();
         if (listEl) await refreshDraftList(listEl, backlogHost);
         if (backlogHost) await loadBacklog(backlogHost);
@@ -2287,10 +2525,9 @@ function openDraftDetail(draftId, listEl, backlogHost) {
     body.append(
       h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
       ta,
-      h('div', { class: 'meta-row', style: { marginTop: '14px' } },
-        h('span', { class: 'lbl-mono' }, 'Collection'),
-        collBtn,
-      ),
+      h('div', { class: 'lbl-mono', style: { marginTop: '14px', marginBottom: '4px' } }, 'File as'),
+      fileModeBar,
+      filingDetail,
       h('div', { class: 'draft-detail-actions' }, discardBtn, commitBtn),
     );
     detailInner.appendChild(body);
@@ -2298,7 +2535,7 @@ function openDraftDetail(draftId, listEl, backlogHost) {
   });
 }
 
-async function startScanIngest(file, kindHint, host) {
+async function startScanIngest(file, kindHint, host, opts = {}) {
   host.innerHTML = '';
   const stream = h('div', { class: 'ingest-stream' });
   const progress = h('div', { class: 'ingest-progress' }, `Uploading ${file.name}…`);
@@ -2310,6 +2547,7 @@ async function startScanIngest(file, kindHint, host) {
     const fd = new FormData();
     fd.append('file', file);
     if (kindHint && kindHint !== 'page') fd.append('kind', kindHint);
+    if (opts.volume) fd.append('volume', opts.volume);
     const res = await fetch('/api/ingest/stream', { method: 'POST', body: fd });
     if (!res.ok) throw new Error('upload failed');
     let total = 1, count = 0;
@@ -2507,7 +2745,7 @@ async function renderIndex(focusKind, focusId) {
         const label = prompt('Heading label?');
         if (!label || !label.trim()) return;
         try {
-          await api('/api/headings', 'POST', { label: label.trim() });
+          await api('/api/headings', 'POST', { label: label.trim(), scope: kind });
           invalidateIndexCache();
           mainInner.innerHTML = '';
           renderIndex(kind);
@@ -2524,7 +2762,9 @@ async function renderIndex(focusKind, focusId) {
     // feels like indenting a notebook TOC, not like switching tabs.
     if (TOC_KINDS.has(kind)) {
       const rows = byKind[kind] || [];
-      const headings = (byKind['heading'] || cachedIndexTree.kinds.find(k => k.kind === 'heading')?.active || []);
+      const allHeadings = (byKind['heading'] || cachedIndexTree.kinds.find(k => k.kind === 'heading')?.active || []);
+      // Only show headings that belong to this tab's scope.
+      const headings = allHeadings.filter(h => (h.meta?.scope || 'collection') === kind);
 
       const inHeading = new Set();
       let anyHeadingRendered = false;
@@ -2700,23 +2940,18 @@ function renderTreeRow(kind, node, depth) {
   const totalP = node.totalPageCount ?? node.total_pages ?? node.directPageCount ?? node.page_count ?? null;
   const counts = h('div', { class: 'tree-counts' }, totalP != null ? String(totalP) : '');
 
-  const actions = h('div', { class: 'tree-actions' });
-  if (!node._repeat) {
-    const renameBtn = buildActionBtn('Rename', () => renameNode(kind, node));
-    const mergeBtn = buildActionBtn('Merge', () => mergeNode(kind, node));
+  let thirdCol;
+  if (kind === 'person') {
+    thirdCol = h('div', { class: 'tree-row-actions' });
+    thirdCol.appendChild(buildActionBtn('Rename', () => renameNode(kind, node)));
+    thirdCol.appendChild(buildActionBtn('Merge', () => mergeNode(kind, node)));
     const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
-    actions.append(renameBtn, mergeBtn, parentBtn);
-    if (kind === 'collection' || kind === 'artifact') {
-      // TOC heading assignment — distinct from the topic-parent ↑ above.
-      const headingBtn = buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node));
-      actions.append(headingBtn);
-    }
-    if (kind === 'collection' || kind === 'artifact' || kind === 'person') {
-      actions.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
-    }
+    thirdCol.appendChild(parentBtn);
+    thirdCol.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
+  } else {
+    thirdCol = counts;
   }
-
-  const row = h('div', { class: 'tree-row' }, chevron, labelEl, counts, actions);
+  const row = h('div', { class: 'tree-row' + (kind === 'person' ? ' no-expand' : '') }, chevron, labelEl, thirdCol);
   const panel = h('div', { class: 'tree-panel', style: { display: 'none' } });
   const kids = h('div', { class: 'tree-children', style: { display: 'none' } });
 
@@ -2742,7 +2977,7 @@ function renderTreeRow(kind, node, depth) {
       }
     }
   };
-  chevron.addEventListener('click', (e) => { e.stopPropagation(); setOpen(); });
+  if (kind !== 'person') chevron.addEventListener('click', (e) => { e.stopPropagation(); setOpen(); });
   // label click → open entity pages in right pane; chevron only toggles inline metadata
   labelEl.addEventListener('click', (e) => { e.stopPropagation(); openEntityDetail(kind, node); });
 
@@ -2760,6 +2995,21 @@ function buildActionBtn(label, onClick) {
 
 function renderConnectionsPanel(panel, kind, node, conn) {
   panel.innerHTML = '';
+
+  // Action strip
+  const actionsRow = h('div', { class: 'tree-panel-actions' });
+  const renameBtn = buildActionBtn('Rename', () => renameNode(kind, node));
+  const mergeBtn  = buildActionBtn('Merge',  () => mergeNode(kind, node));
+  const parentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, parentBtn));
+  actionsRow.append(renameBtn, mergeBtn, parentBtn);
+  if (kind === 'collection' || kind === 'artifact') {
+    const headingBtn = buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node));
+    actionsRow.append(headingBtn);
+  }
+  if (kind === 'collection' || kind === 'artifact' || kind === 'person') {
+    actionsRow.appendChild(buildActionBtn('Archive', () => archiveNode(kind, node)));
+  }
+  panel.appendChild(actionsRow);
 
   // Metadata editors
   const meta = h('div', { class: 'meta-form' });
@@ -2826,13 +3076,34 @@ function renderConnectionsPanel(panel, kind, node, conn) {
         return el;
       })(),
     );
-  } else if (kind === 'artifact' || kind === 'reference') {
+  } else if (kind === 'artifact') {
+    meta.append(
+      h('label', null, 'notes'),
+      (() => {
+        const el = h('textarea', { class: 'input', rows: 2, value: node.meta?.notes || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/artifacts/${node.id}`, 'PATCH', { notes: el.value || null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+      h('label', null, 'URL'),
+      (() => {
+        const el = h('input', { class: 'input', value: node.externalUrl || node.external_url || '' });
+        el.addEventListener('blur', async () => {
+          try { await api(`/api/artifacts/${node.id}`, 'PATCH', { external_url: el.value || null }); toast('saved', 'ok'); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+        return el;
+      })(),
+    );
+  } else if (kind === 'reference') {
     meta.append(
       h('label', null, 'URL'),
       (() => {
         const el = h('input', { class: 'input', value: node.externalUrl || node.external_url || '' });
         el.addEventListener('blur', async () => {
-          try { await api(`/api/${kind}s/${node.id}`, 'PATCH', { external_url: el.value || null }); toast('saved', 'ok'); }
+          try { await api(`/api/references/${node.id}`, 'PATCH', { external_url: el.value || null }); toast('saved', 'ok'); }
           catch (err) { toast(err.message, 'err'); }
         });
         return el;
@@ -2909,7 +3180,7 @@ function renderConnectionsPanel(panel, kind, node, conn) {
 }
 
 // ── Entity detail (right pane, pages view) ──
-async function openEntityDetail(kind, node) {
+async function openEntityDetail(kind, node, { skipRedirect = false } = {}) {
   detailBackContext = null;
   detailInner.innerHTML = '';
   detailInner.appendChild(h('div', { class: 'soft', style: { padding: '24px' } }, 'Loading…'));
@@ -2918,6 +3189,25 @@ async function openEntityDetail(kind, node) {
   let conn;
   try { conn = await api(`/api/index/${kind}/${node.id}/connections`); }
   catch (err) { detailInner.innerHTML = ''; detailInner.appendChild(h('div', { class: 'empty' }, err.message)); return; }
+
+  if (kind === 'artifact') {
+    try { conn.meta = await api(`/api/artifacts/${node.id}`); } catch {}
+  }
+
+  const _connPages = conn.pages || [];
+  const _connGroups = new Map();
+  for (const p of _connPages) {
+    const key = p.scan_path || `p:${p.id}`;
+    if (!_connGroups.has(key)) _connGroups.set(key, []);
+    _connGroups.get(key).push(p);
+  }
+  if (_connGroups.size === 1 && !skipRedirect) {
+    const first = _connGroups.values().next().value[0];
+    const label = node.label || node.title || node.canonical || '(untitled)';
+    detailBackContext = { label, action: () => openEntityDetail(kind, node, { skipRedirect: true }) };
+    openPageDetail(first.id);
+    return;
+  }
 
   renderEntityDetail(kind, node, conn);
 }
@@ -2931,6 +3221,19 @@ function renderEntityDetail(kind, node, conn) {
     ? h('button', { class: 'btn-ghost', onclick: () => convertEntityDetail(kind, node) }, 'Convert to…')
     : null;
 
+  const detailParentBtn = buildActionBtn('↑ Parent', () => setParent(kind, node, detailParentBtn));
+  const detailActionsRow = h('div', { class: 'tree-panel-actions', style: { padding: '10px 28px 2px' } },
+    buildActionBtn('Rename', () => renameNode(kind, node)),
+    buildActionBtn('Merge',  () => mergeNode(kind, node)),
+    detailParentBtn,
+    ...(kind === 'collection' || kind === 'artifact'
+      ? [buildActionBtn('↑ Heading', () => setHeadingForNode(kind, node))]
+      : []),
+    ...(kind === 'collection' || kind === 'artifact' || kind === 'person'
+      ? [buildActionBtn('Archive', () => archiveNode(kind, node))]
+      : []),
+  );
+
   detailInner.append(
     h('div', { class: 'detail-head' },
       h('div', null,
@@ -2942,9 +3245,88 @@ function renderEntityDetail(kind, node, conn) {
         h('button', { class: 'icon-btn', onclick: () => closeDetail(), title: 'Close' }, '×'),
       ),
     ),
+    detailActionsRow,
   );
 
   const body = h('div', { style: { padding: '20px 4px' } });
+
+  // Artifact metadata preview
+  if (kind === 'artifact' && conn.meta) {
+    const meta = conn.meta;
+    const previewBlock = h('div', { class: 'artifact-meta-block' });
+
+    // Notes summary
+    if (meta.notes) {
+      previewBlock.appendChild(h('div', { class: 'artifact-filing' },
+        h('span', { class: 'artifact-filing-lbl' }, 'Notes'),
+        h('span', { class: 'artifact-filing-path', style: { fontFamily: 'var(--font-sans)', fontWeight: 'normal', color: 'var(--ink-2)' } }, meta.notes),
+      ));
+    }
+
+    // External URL card
+    if (meta.external_url) {
+      const isGoogle = /docs\.google\.com|drive\.google\.com/.test(meta.external_url);
+      const icon = isGoogle ? '↗ ' : '↗ ';
+      const label = isGoogle ? 'Open in Google Docs' : 'Open link';
+      const urlCard = h('div', { class: 'artifact-url-card' },
+        h('a', { href: meta.external_url, target: '_blank', rel: 'noopener', class: 'artifact-url-link' },
+          h('span', { class: 'artifact-url-icon' }, isGoogle ? '⎆' : '🔗'),
+          h('span', null, label),
+        ),
+        h('span', { class: 'artifact-url-host', title: meta.external_url },
+          (() => { try { return new URL(meta.external_url).hostname; } catch { return meta.external_url; } })()
+        ),
+        meta.fetched_at ? h('span', { class: 'artifact-url-fetched' }, `synced ${new Date(meta.fetched_at).toLocaleDateString()}`) : null,
+        meta.fetched_error ? h('span', { class: 'artifact-url-error' }, meta.fetched_error) : null,
+      );
+      previewBlock.appendChild(urlCard);
+    }
+
+    // Filing location
+    const filingParts = [meta.drawer, meta.hanging_folder, meta.manila_folder].filter(Boolean);
+    if (filingParts.length) {
+      previewBlock.appendChild(h('div', { class: 'artifact-filing' },
+        h('span', { class: 'artifact-filing-lbl' }, 'Filing'),
+        h('span', { class: 'artifact-filing-path' }, filingParts.join(' › ')),
+      ));
+    }
+
+    // File versions
+    if (meta.versions && meta.versions.length) {
+      const versionsEl = h('div', { class: 'artifact-versions' },
+        h('div', { class: 'artifact-versions-lbl' }, `${meta.versions.length} file version${meta.versions.length !== 1 ? 's' : ''}`),
+        ...meta.versions.map(v => h('div', { class: 'artifact-version-row' },
+          h('span', { class: 'lbl-mono' }, `v${v.version}`),
+          v.note ? h('span', { style: { color: 'var(--ink-2)' } }, v.note) : null,
+          v.file_path ? h('a', { href: v.file_path, target: '_blank', rel: 'noopener', class: 'btn-ghost', style: { marginLeft: 'auto' } }, 'Open') : null,
+        )),
+      );
+      previewBlock.appendChild(versionsEl);
+    }
+
+    // Linked collections and indexes
+    const linkedItems = [...(meta.linked_collections || []), ...(meta.linked_indexes || [])];
+    if (linkedItems.length) {
+      const linkedEl = h('div', { class: 'artifact-linked' },
+        h('span', { class: 'artifact-filing-lbl' }, 'Linked to'),
+        h('div', { class: 'links-row', style: { marginTop: '6px' } },
+          ...(meta.linked_collections || []).map(c => {
+            const chip = h('span', { class: 'chip' }, c.title);
+            chip.addEventListener('click', () => jumpToIndexNode('collection', c.id));
+            return chip;
+          }),
+          ...(meta.linked_indexes || []).map(u => {
+            const chip = h('span', { class: 'chip' }, u.title);
+            chip.addEventListener('click', () => jumpToIndexNode('user_index', u.id));
+            return chip;
+          }),
+        ),
+      );
+      previewBlock.appendChild(linkedEl);
+    }
+
+    if (previewBlock.children.length) body.appendChild(previewBlock);
+  }
 
   // Pages
   const pages = conn.pages || [];

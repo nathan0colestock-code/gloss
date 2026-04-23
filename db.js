@@ -243,6 +243,7 @@ db.exec(`
   // Rotation in degrees clockwise — 0 | 90 | 180 | 270. CSS-only rotation; the
   // underlying scan file on disk is never modified. See rotatePage() / setPageRotation().
   if (!cols.includes('rotation')) db.exec('ALTER TABLE pages ADD COLUMN rotation INTEGER DEFAULT 0');
+  if (!cols.includes('deleted_at')) db.exec('ALTER TABLE pages ADD COLUMN deleted_at TEXT');
   db.exec('CREATE INDEX IF NOT EXISTS ix_pages_vol_pagenum ON pages(volume, page_number)');
 }
 {
@@ -392,6 +393,10 @@ db.exec(`
   }
   if (!cols.includes('first_names')) db.exec('ALTER TABLE people ADD COLUMN first_names TEXT');
 }
+{
+  const cols = db.pragma('table_info(artifacts)').map(c => c.name);
+  if (!cols.includes('notes')) db.exec('ALTER TABLE artifacts ADD COLUMN notes TEXT');
+}
 
 // Explicit UNIQUE indexes + perf indexes. `CREATE TABLE IF NOT EXISTS` no-ops
 // on pre-existing DBs, so declarative UNIQUE constraints don't take effect —
@@ -428,6 +433,13 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_ci ON headings(label COLLATE NOCASE);
 `);
+// Migration: add scope to headings so collections and artifacts have separate heading pools.
+// try-catch is idempotent — SQLite throws "duplicate column name" if the column already exists.
+try { db.exec(`ALTER TABLE headings ADD COLUMN scope TEXT NOT NULL DEFAULT 'collection'`); } catch {}
+// Drop the old label-only unique index; the new (label, scope) composite index takes its place.
+// try-catch: "no such index" on repeat runs is fine.
+try { db.exec(`DROP INDEX ux_headings_label_ci`); } catch {}
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_scope_ci ON headings(label COLLATE NOCASE, scope)`);
 
 // Exclusions / inclusions for AI-curated user_indexes. An excluded entry is
 // invisible in the index listing; an included entry bypasses the noise filter.
@@ -583,13 +595,15 @@ function lookupIndexRow(kind, id) {
   const spec = _indexKindSpec(kind);
   const extra = kind === 'user_index'
     ? ', is_ai_generated, structure_description, description'
-    : '';
+    : kind === 'heading' ? ', scope' : '';
   const where = spec.kindFilter ? `WHERE id = ? AND ${spec.kindFilter}` : 'WHERE id = ?';
   const row = db.prepare(
     `SELECT id, ${spec.labelCol} as label, ${spec.archiveCol} as archived_at${extra} FROM ${spec.table} ${where}`
   ).get(id);
   if (!row) return null;
-  if (kind === 'scripture') {
+  if (kind === 'heading') {
+    row.meta = { scope: row.scope || 'collection' };
+  } else if (kind === 'scripture') {
     const s = db.prepare(`SELECT book, chapter, verse_start, verse_end FROM scripture_refs WHERE id = ?`).get(id);
     if (s) row.meta = { book: s.book || null, chapter: s.chapter ?? null, verse_start: s.verse_start ?? null, verse_end: s.verse_end ?? null };
   } else if (kind === 'book') {
@@ -599,6 +613,9 @@ function lookupIndexRow(kind, id) {
       WHERE b.id = ?
     `).get(id);
     if (b) row.meta = { author_label: b.author_entity_label || b.author_label || null };
+  } else if (kind === 'artifact') {
+    const a = db.prepare(`SELECT notes FROM artifacts WHERE id = ?`).get(id);
+    if (a) row.meta = { notes: a.notes || null };
   }
   return row;
 }
@@ -3001,15 +3018,15 @@ function removePageUserIndexLink(pageId, userIndexId) {
   `).run(pageId, userIndexId, userIndexId, pageId);
 }
 
-function createArtifact({ id, title, drawer, hanging_folder, manila_folder, status, external_url }) {
+function createArtifact({ id, title, drawer, hanging_folder, manila_folder, status, external_url, notes }) {
   db.prepare(`
-    INSERT INTO artifacts (id, title, drawer, hanging_folder, manila_folder, status, external_url, created_at)
-    VALUES (?, ?, ?, ?, ?, COALESCE(?, 'in_progress'), ?, datetime('now'))
-  `).run(id, title, drawer ?? null, hanging_folder ?? null, manila_folder ?? null, status ?? null, external_url ?? null);
+    INSERT INTO artifacts (id, title, drawer, hanging_folder, manila_folder, status, external_url, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, COALESCE(?, 'in_progress'), ?, ?, datetime('now'))
+  `).run(id, title, drawer ?? null, hanging_folder ?? null, manila_folder ?? null, status ?? null, external_url ?? null, notes ?? null);
   return db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id);
 }
 
-function updateArtifact(id, { title, drawer, hanging_folder, manila_folder, status, external_url }) {
+function updateArtifact(id, { title, drawer, hanging_folder, manila_folder, status, external_url, notes }) {
   return db.prepare(`
     UPDATE artifacts SET
       title = COALESCE(?, title),
@@ -3017,10 +3034,11 @@ function updateArtifact(id, { title, drawer, hanging_folder, manila_folder, stat
       hanging_folder = COALESCE(?, hanging_folder),
       manila_folder = COALESCE(?, manila_folder),
       status = COALESCE(?, status),
-      external_url = COALESCE(?, external_url)
+      external_url = COALESCE(?, external_url),
+      notes = COALESCE(?, notes)
     WHERE id = ?
   `).run(title ?? null, drawer ?? null, hanging_folder ?? null, manila_folder ?? null,
-         status ?? null, external_url ?? null, id);
+         status ?? null, external_url ?? null, notes ?? null, id);
 }
 
 function addArtifactVersion({ id, artifact_id, file_path, note }) {
@@ -3390,6 +3408,7 @@ function listDailyLogs() {
     SELECT p.id, p.volume, p.page_number, p.scan_path, p.summary, p.captured_at
     FROM links l JOIN pages p ON p.id = l.from_id
     WHERE l.to_type='daily_log' AND l.to_id=? AND l.from_type='page'
+      AND p.deleted_at IS NULL
     ORDER BY p.captured_at ASC
   `);
 
@@ -3446,9 +3465,10 @@ function listMonthSpine(ym) {
 
   const pageCounts = db.prepare(`
     SELECT l.to_id AS dl_id, COUNT(DISTINCT l.from_id) AS n
-    FROM links l
+    FROM links l JOIN pages p ON p.id = l.from_id
     WHERE l.to_type='daily_log' AND l.from_type='page'
       AND l.to_id IN (SELECT id FROM daily_logs WHERE substr(date, 1, 7) = ?)
+      AND p.deleted_at IS NULL
     GROUP BY l.to_id
   `).all(ym);
   const countsByDlId = Object.fromEntries(pageCounts.map(r => [r.dl_id, r.n]));
@@ -3458,6 +3478,7 @@ function listMonthSpine(ym) {
     FROM links l JOIN pages p ON p.id = l.from_id
     WHERE l.to_type='daily_log' AND l.from_type='page'
       AND l.to_id IN (SELECT id FROM daily_logs WHERE substr(date, 1, 7) = ?)
+      AND p.deleted_at IS NULL
       AND p.summary IS NOT NULL AND p.summary != ''
     ORDER BY p.volume, p.page_number, p.captured_at
   `).all(ym);
@@ -3517,6 +3538,7 @@ function getDailyLogDetail(id) {
     SELECT p.id, p.volume, p.page_number, p.scan_path, p.summary, p.captured_at, p.source_kind
     FROM links l JOIN pages p ON p.id = l.from_id
     WHERE l.to_type='daily_log' AND l.to_id=? AND l.from_type='page'
+      AND p.deleted_at IS NULL
     ORDER BY p.captured_at ASC
   `).all(id);
   const pageIds = pages.map(p => p.id);
@@ -3969,6 +3991,14 @@ function deleteIndexEntry(id) {
 }
 
 // --- Ingest failures ---
+
+function softDeletePage(id) {
+  const page = db.prepare('SELECT id FROM pages WHERE id = ?').get(id);
+  if (!page) return { deleted: 0 };
+  const now = new Date().toISOString();
+  db.prepare('UPDATE pages SET deleted_at = ? WHERE id = ?').run(now, id);
+  return { deleted: 1 };
+}
 
 function deletePagesByScanPath(scanPath) {
   const pages = db.prepare('SELECT id FROM pages WHERE scan_path = ?').all(scanPath);
@@ -4474,6 +4504,16 @@ function searchAll(q, limit = 5) {
 function getArtifact(id) {
   return db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id);
 }
+function getArtifactDetail(id) {
+  const a = db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id);
+  if (!a) return null;
+  return {
+    ...a,
+    versions: db.prepare('SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC').all(id),
+    linked_collections: listLinkedCollections('artifact', id),
+    linked_indexes: listLinkedUserIndexes('artifact', id),
+  };
+}
 function getReference(id) {
   return db.prepare('SELECT * FROM reference_materials WHERE id = ?').get(id);
 }
@@ -4503,7 +4543,7 @@ function convertEntityKind(fromKind, fromId, toKind) {
   db.transaction(() => {
     // Create destination entity.
     if (toKind === 'artifact') {
-      createArtifact({ id: newId, title: src.title, external_url: src.external_url || null });
+      createArtifact({ id: newId, title: src.title, external_url: src.external_url || null, notes: src.notes || src.description || src.note || null });
       if (src.fetched_content || src.fetched_at || src.fetched_error) {
         updateArtifactContent(newId, {
           fetched_content: src.fetched_content || null,
@@ -4793,20 +4833,21 @@ function getPlanningHub({ weekStart } = {}) {
 // child, so a heading can be nested under another heading, and a collection
 // or artifact can sit under multiple headings.
 
-function createHeading({ id, label, description = null }) {
+function createHeading({ id, label, description = null, scope = 'collection' }) {
   if (!label || !String(label).trim()) throw new Error('label required');
+  const safeScope = scope === 'artifact' ? 'artifact' : 'collection';
   const rowId = id || `h_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
   const now = new Date().toISOString();
-  const existing = db.prepare(`SELECT id FROM headings WHERE label = ? COLLATE NOCASE`).get(label.trim());
+  const existing = db.prepare(`SELECT id FROM headings WHERE label = ? COLLATE NOCASE AND scope = ?`).get(label.trim(), safeScope);
   if (existing) return { id: existing.id, existed: true };
-  db.prepare(`INSERT INTO headings (id, label, description, created_at) VALUES (?, ?, ?, ?)`)
-    .run(rowId, label.trim(), description || null, now);
+  db.prepare(`INSERT INTO headings (id, label, description, scope, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(rowId, label.trim(), description || null, safeScope, now);
   return { id: rowId, existed: false };
 }
 
 function listHeadings({ includeArchived = false } = {}) {
   const rows = db.prepare(`
-    SELECT h.id, h.label, h.description, h.archived_at,
+    SELECT h.id, h.label, h.description, h.scope, h.archived_at,
            (SELECT COUNT(*) FROM index_parents ip
             WHERE ip.parent_kind = 'heading' AND ip.parent_id = h.id) AS child_count
     FROM headings h
@@ -5490,10 +5531,10 @@ module.exports = {
   markIngestFailureResolved, deleteIngestFailure,
   renameCollection, mergeCollectionInto, findCollectionDuplicateCandidates,
   setCollectionParent,
-  updateCollectionSummary, updateScriptureLabel, deletePagesByScanPath,
+  updateCollectionSummary, updateScriptureLabel, softDeletePage, deletePagesByScanPath,
   getRememberFeed, searchAll,
   getUnifiedIndex, renameOrMergeEntity, mergeEntitiesInto, setEntityArchived,
-  getArtifact, getReference,
+  getArtifact, getArtifactDetail, getReference,
   markPageAsReference, listReferenceScans, listReferenceLabels,
   findPeopleByFirstName, personRecencyMap,
   addPersonAlias, findPagesMentioningAlias, getKnownAliases, getHandwritingCorrections,
