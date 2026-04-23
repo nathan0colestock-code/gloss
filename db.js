@@ -393,6 +393,44 @@ db.exec(`
   }
   if (!cols.includes('first_names')) db.exec('ALTER TABLE people ADD COLUMN first_names TEXT');
 }
+
+// Idempotent cleanup: strip literal ASCII/smart quote chars from stored aliases.
+// Background: extractPersonNameFromSubject used to normalize only smart quotes,
+// so an AI-generated subject like `Who is "Baz"?` captured `"Baz"` (with ASCII
+// double-quotes) and persisted that through addPersonAlias. The literal
+// quotes broke word-boundary regex in findPagesMentioningAlias (\b"Baz"\b
+// never matches) and defeated canonical dedup (aliasLc !== canonicalLc).
+// This cleanup re-normalizes every person's first_names CSV once per boot —
+// safe to run repeatedly because it's a no-op when nothing is dirty.
+{
+  const rows = db.prepare(`SELECT id, label, first_names FROM people WHERE first_names IS NOT NULL AND TRIM(first_names) != ''`).all();
+  const stripQuotes = (s) => String(s || '').replace(/[\u201c\u201d\u2018\u2019"']/g, '').trim();
+  const update = db.prepare('UPDATE people SET first_names = ? WHERE id = ?');
+  let cleaned = 0;
+  for (const p of rows) {
+    const canonicalLc = (p.label || '').toLowerCase();
+    const original = p.first_names;
+    const parts = original.split(',').map(s => s.trim()).filter(Boolean);
+    const seen = new Set();
+    const out = [];
+    for (const raw of parts) {
+      const cleanedPart = stripQuotes(raw);
+      if (!cleanedPart) continue;
+      const lc = cleanedPart.toLowerCase();
+      if (lc === canonicalLc) continue; // never keep the label as its own alias
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      out.push(cleanedPart);
+    }
+    const next = out.join(', ');
+    if (next !== original) {
+      update.run(next || null, p.id);
+      cleaned++;
+    }
+  }
+  if (cleaned) console.log(`[migrate] cleaned quote-corrupted first_names on ${cleaned} people rows`);
+}
+
 {
   const cols = db.pragma('table_info(artifacts)').map(c => c.name);
   if (!cols.includes('notes')) db.exec('ALTER TABLE artifacts ADD COLUMN notes TEXT');
