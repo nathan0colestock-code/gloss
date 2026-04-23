@@ -2303,23 +2303,29 @@ function dateLabel(iso) {
 })();
 const _nprog = (() => {
   const el = document.getElementById('nprog');
-  let pending = 0, pct = 0, tick = null, doneT = null;
+  let pending = 0, pct = 0, tick = null, doneT = null, showT = null;
   const apply = () => { if (el) el.style.setProperty('--w', pct + '%'); };
+  function _show() {
+    pct = 8; apply();
+    el.classList.remove('done');
+    el.classList.add('active');
+    clearInterval(tick);
+    tick = setInterval(() => {
+      if (pct < 92) { pct += Math.max(0.6, (94 - pct) * 0.08); apply(); }
+    }, 220);
+  }
   function start() {
     pending++;
     if (pending === 1 && el) {
-      pct = 8; apply();
-      el.classList.remove('done');
-      el.classList.add('active');
-      clearInterval(tick);
-      tick = setInterval(() => {
-        if (pct < 92) { pct += Math.max(0.6, (94 - pct) * 0.08); apply(); }
-      }, 220);
+      clearTimeout(showT);
+      showT = setTimeout(_show, 150);
     }
   }
   function stop() {
     pending = Math.max(0, pending - 1);
-    if (pending === 0 && el) {
+    if (pending === 0) {
+      clearTimeout(showT); showT = null;
+      if (!el || !el.classList.contains('active')) { pct = 0; apply(); return; }
       clearInterval(tick); tick = null;
       pct = 100; apply();
       clearTimeout(doneT);
