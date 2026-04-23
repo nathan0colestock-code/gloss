@@ -26,7 +26,7 @@ function prepareImageForGemini(imagePath) {
 const PARSE_MODEL = 'gemini-2.5-pro';
 const CHAT_MODEL = 'gemini-2.5-flash';
 
-const PARSE_SYSTEM = `You are parsing a handwritten notebook page for a personal knowledge system called Foxed.
+const PARSE_SYSTEM = `You are parsing a handwritten notebook page for a personal knowledge system called Gloss.
 
 The notebook is sovereign. Never quote the user's exact words verbatim.
 Every item you extract must be a pointer-summary, not a transcription.
@@ -271,7 +271,7 @@ async function parsePageImage(imagePath, priorContext = '', recentAnsweredQuesti
     : '';
   const kindPhrase = { book: 'a set of book notes', artifact: 'an artifact cover or description', reference: 'an external reference (article/URL/podcast) annotation' }[userKindHint];
   const userKindBlock = kindPhrase
-    ? `The user has told Foxed that this scan is ${kindPhrase}. Emit AT LEAST ONE ${userKindHint}_hint with your best extraction of title/author/source from the page, even at moderate confidence. Do NOT refuse the hint because the page is a short note — the user explicitly declared its kind.\n\n`
+    ? `The user has told Gloss that this scan is ${kindPhrase}. Emit AT LEAST ONE ${userKindHint}_hint with your best extraction of title/author/source from the page, even at moderate confidence. Do NOT refuse the hint because the page is a short note — the user explicitly declared its kind.\n\n`
     : '';
   const householdsBlock = knownHouseholds.length
     ? `Known households already on file (use these exact labels when the page mentions them — match possessives/plurals/"the X family" to the bare surname):\n${knownHouseholds.map(h => `- ${h}`).join('\n')}\n\n`
@@ -317,7 +317,7 @@ async function parsePageImage(imagePath, priorContext = '', recentAnsweredQuesti
   return { pages: [parsed] };
 }
 
-const CHAT_SYSTEM = `You are Foxed, a quiet data-forward notebook companion.
+const CHAT_SYSTEM = `You are Gloss, a quiet data-forward notebook companion.
 
 Rules:
 - NEVER quote the user's words verbatim. Use pointer-summaries only.
@@ -464,7 +464,7 @@ Guidance:
   } catch { return empty; }
 }
 
-const VOICE_SYSTEM = `You are parsing a voice-memo transcript for a personal knowledge system called Foxed.
+const VOICE_SYSTEM = `You are parsing a voice-memo transcript for a personal knowledge system called Gloss.
 
 The transcript is private raw material. Never quote the user's exact words verbatim in any extracted item.
 Every item must be a pointer-summary, not a transcription.
@@ -534,7 +534,7 @@ async function parseVoiceMemo(transcript, recentAnsweredQuestions = [], knownAli
 // Returns the same { pages: [PAGE_OBJECT] } shape as parsePageImage so the caller
 // can reuse savePageFromParse and get full collection/book/artifact/reference
 // hint handling, threading, page_refs, etc.
-const MARKDOWN_SYSTEM = `You are parsing a user-authored markdown document for a personal knowledge system called Foxed.
+const MARKDOWN_SYSTEM = `You are parsing a user-authored markdown document for a personal knowledge system called Gloss.
 
 The markdown is the user's own prose, typed directly into the app. Treat it with the same rules as a handwritten notebook page:
 - Never quote the user's words verbatim in any extracted item, summary, or role_summary.
@@ -700,7 +700,7 @@ Return ONLY valid JSON in this exact shape (no markdown fences):
 //   { "text": "<plain answer with → v.X p.Y citations>" }
 //   { "action": { "name": "<action_name>", "args": {...}, "rationale": "<why>" } }
 // Never both. Actions are proposed, not executed. The server validates.
-const ASSISTANT_SYSTEM = `You are Foxed, the user's notebook assistant. You can answer with text OR propose a single bounded action; never both.
+const ASSISTANT_SYSTEM = `You are Gloss, the user's notebook assistant. You can answer with text OR propose a single bounded action; never both.
 
 NEVER quote the user's notebook prose verbatim — every reference must be a pointer-summary. Cite sources as → v.X p.Y (or → p.Y if volume unknown).
 
