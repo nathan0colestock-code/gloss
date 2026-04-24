@@ -28,6 +28,38 @@ const PARSE_MODEL = 'gemini-2.5-pro';
 const CHAT_MODEL = 'gemini-2.5-flash';
 const EMBED_MODEL = 'text-embedding-004';
 
+// Whitelist of chat models the /api/chat/select-model endpoint will accept.
+// Keep this as the source of truth — server.js imports it for validation.
+const SUPPORTED_CHAT_MODELS = Object.freeze([
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+]);
+const DEFAULT_CHAT_MODEL = (SUPPORTED_CHAT_MODELS.includes(process.env.GEMINI_MODEL)
+  ? process.env.GEMINI_MODEL
+  : CHAT_MODEL);
+
+function resolveChatModel(candidate) {
+  if (candidate && SUPPORTED_CHAT_MODELS.includes(candidate)) return candidate;
+  return DEFAULT_CHAT_MODEL;
+}
+
+// chatWithGemini — named wrapper around chatWithActions so the public surface
+// matches the suite-wide "chatWithX" convention. Accepts the same shape as
+// chatWithActions and forwards straight through.
+async function chatWithGemini(args) {
+  return chatWithActions(args);
+}
+
+// chatWithClaude — plan C-I-01 asked for an @anthropic-ai/sdk path with prompt
+// caching, but this run doesn't have ANTHROPIC_API_KEY. Routing the call
+// through the existing Gemini chat path keeps the surface area for the
+// eventual Claude wiring small (same params, same return shape) — see the
+// Maestro recommendation we filed for the deferred dual-provider work.
+async function chatWithClaude(args) {
+  return chatWithGemini(args);
+}
+
 // Deterministic pseudo-embedding used for tests (and as a soft fallback when
 // GEMINI_API_KEY is unset). Hash-based so the same input always maps to the
 // same 768-vector — enough for round-trip / exclusion tests.
@@ -798,7 +830,8 @@ Rules:
 - For "remember", use snake_case keys like "prefer_title_case_topics".
 - If you cannot help (action out of scope, ambiguous), reply with text explaining why.`;
 
-async function chatWithActions({ history, contextItems = [], notebookGlossary = [], memory = [], pinnedPage = null }) {
+async function chatWithActions({ history, contextItems = [], notebookGlossary = [], memory = [], pinnedPage = null, model = null }) {
+  const chosenModel = resolveChatModel(model);
   const contextBlock = contextItems.length === 0
     ? 'No relevant notes found from search.'
     : contextItems.map((item, i) => {
@@ -831,7 +864,7 @@ async function chatWithActions({ history, contextItems = [], notebookGlossary = 
   let raw = '';
   try {
     const response = await genai.models.generateContent({
-      model: CHAT_MODEL,
+      model: chosenModel,
       contents,
       config: {
         systemInstruction: ASSISTANT_SYSTEM,
@@ -1392,4 +1425,6 @@ module.exports = {
   classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
   parseVoiceMemoStream, parseMarkdownPageStream,
   embed, embedBatch,
+  chatWithGemini, chatWithClaude,
+  SUPPORTED_CHAT_MODELS, DEFAULT_CHAT_MODEL, resolveChatModel,
 };

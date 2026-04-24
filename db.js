@@ -1359,6 +1359,11 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 `);
+// Per-session model preference for /api/chat/select-model. Original suite
+// plan called for Claude-vs-Gemini routing; ANTHROPIC_API_KEY isn't
+// provisioned for this agent run, so we route between Gemini variants
+// (flash / pro) until that gets wired up. See Maestro recommendation.
+ensureColumn('chat_sessions', 'model', 'TEXT');
 
 function getMonthlySummary(ym) {
   return db.prepare(`SELECT year_month, summary, updated_at FROM monthly_summaries WHERE year_month = ?`).get(ym) || null;
@@ -4736,6 +4741,20 @@ function deleteChatSession(id) {
   db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
   db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
 }
+// Persist the chosen chat model on a session. Caller validates the value;
+// we don't whitelist here so the db layer stays LLM-provider-agnostic.
+function setChatSessionModel(id, model) {
+  const now = new Date().toISOString();
+  const info = db.prepare(
+    `UPDATE chat_sessions SET model = ?, updated_at = ? WHERE id = ?`
+  ).run(model || null, now, id);
+  if (!info.changes) return null;
+  return db.prepare('SELECT * FROM chat_sessions WHERE id = ?').get(id);
+}
+function getChatSessionModel(id) {
+  const row = db.prepare('SELECT model FROM chat_sessions WHERE id = ?').get(id);
+  return row ? (row.model || null) : null;
+}
 function appendChatMessage({ session_id, role, body, proposal_json, status }) {
   const id = require('crypto').randomUUID();
   const now = new Date().toISOString();
@@ -5655,6 +5674,7 @@ module.exports = {
   getMonthlySummary, setMonthlySummary,
   // Phase 4.5 — chat assistant
   listChatSessions, getChatSession, createChatSession, touchChatSession, deleteChatSession,
+  setChatSessionModel, getChatSessionModel,
   appendChatMessage, getChatMessage, setChatMessageStatus,
   listChatMemory, setChatMemory, deleteChatMemory,
   // Phase 4 — Planning hub

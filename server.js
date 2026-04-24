@@ -22,6 +22,7 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const db = require('./db');
+const aiModels = require('./ai'); // surfaces SUPPORTED_CHAT_MODELS / DEFAULT_CHAT_MODEL
 const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
         classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
@@ -2238,6 +2239,32 @@ app.delete('/api/chat/sessions/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── POST /api/chat/select-model ────────────────────────────────────────────
+// Persist a chat-session-level model preference. Original spec called for
+// Claude-vs-Gemini routing; without ANTHROPIC_API_KEY this run offers Gemini
+// variants (flash / pro / 2.0-flash). Returns the updated session row.
+//
+// Body: { session_id: string, model: string }
+// 400 on invalid model. Passing model=null/empty resets to the default.
+app.post('/api/chat/select-model', (req, res) => {
+  const { session_id, model } = req.body || {};
+  if (!session_id) return res.status(400).json({ error: 'session_id required' });
+  const session = db.getChatSession(session_id);
+  if (!session) return res.status(404).json({ error: 'session not found' });
+  if (model === null || model === '' || model === undefined) {
+    const updated = db.setChatSessionModel(session_id, null);
+    return res.json({ session: updated, model: null, default: aiModels.DEFAULT_CHAT_MODEL });
+  }
+  if (!aiModels.SUPPORTED_CHAT_MODELS.includes(model)) {
+    return res.status(400).json({
+      error: 'unsupported model',
+      supported: aiModels.SUPPORTED_CHAT_MODELS,
+    });
+  }
+  const updated = db.setChatSessionModel(session_id, model);
+  res.json({ session: updated, model, default: aiModels.DEFAULT_CHAT_MODEL });
+});
+
 // Build the per-turn context: resolve @mentions + FTS hits + date scoping.
 // Mirrors the legacy /api/chat path so behavior is consistent.
 function _buildChatContext(query) {
@@ -2399,6 +2426,7 @@ app.post('/api/chat/sessions/:id/messages', async (req, res) => {
       notebookGlossary: db.getGlossary(),
       memory,
       pinnedPage,
+      model: session.session.model || null,
     });
   } catch (err) {
     const errMsg = db.appendChatMessage({ session_id: sessionId, role: 'assistant', body: `(error: ${err.message || err})` });
