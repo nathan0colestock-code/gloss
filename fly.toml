@@ -1,4 +1,4 @@
-app = "gloss-nc"
+app = "your-gloss-app"
 primary_region = "ord"
 
 [build]

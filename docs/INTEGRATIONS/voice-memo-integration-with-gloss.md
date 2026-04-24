@@ -19,7 +19,7 @@ extraction, daily-log filing, and AI index classification.
 
 | Var | Description |
 |-----|-------------|
-| `GLOSS_URL` | Base URL of the Gloss server, e.g. `https://gloss-nc.fly.dev` |
+| `GLOSS_URL` | Base URL of the Gloss server, e.g. `https://your-gloss-app.fly.dev` |
 | `GLOSS_API_KEY` | Gloss's `API_KEY` — used as `Authorization: Bearer <key>` |
 
 ---
@@ -93,7 +93,7 @@ with `source='voice_gloss'` for traceability in the Maestro dashboard.
   "ok":           true,
   "page_id":      "...",
   "date":         "...",
-  "review_url":   "https://gloss-nc.fly.dev/daily/YYYY-MM-DD",
+  "review_url":   "https://your-gloss-app.fly.dev/daily/YYYY-MM-DD",
   "capture_id":   42
 }
 ```

@@ -5,3 +5,9 @@ data/
 *.log
 .claude/
 *.db.bak*
+CLAUDE.md
+AUDIT-*.md
+tasks.md
+SYSTEM.md
+LESSONS.md
+reports/

@@ -6,6 +6,8 @@ You scan notebook spreads (images or multi-page PDFs) or paste voice-memo transc
 
 Nothing stored in Gloss quotes your prose verbatim. Every entry is a pointer-summary back to the scan.
 
+Part of a five-app personal suite: [maestro](https://github.com/nathan0colestock-code/maestro) · [comms](https://github.com/nathan0colestock-code/comms) · [scribe](https://github.com/nathan0colestock-code/scribe) · [black](https://github.com/nathan0colestock-code/black)
+
 ---
 
 ## Surfaces
@@ -93,7 +95,7 @@ See [`.env.example`](.env.example) for all options. Required:
 
 ## Comms integration (optional)
 
-If you also run [Comms](../comms) — the iMessage + Gmail + Calendar
+If you also run [Comms](https://github.com/nathan0colestock-code/comms) — the iMessage + Gmail + Calendar
 aggregator — Gloss can push priority people (anyone with
 `priority >= 1` on their profile) to it on a 15-minute interval. Comms
 uses the push to show per-person notebook context, generate AI
@@ -159,7 +161,7 @@ Drop a scan (JPEG/PNG or PDF) or paste a voice-memo transcript through the UI. T
 
 Gloss is the **personal knowledge graph** node of a five-app personal suite. The apps are independent processes that talk over HTTP with Bearer auth; each runs on [Fly.io](https://fly.io) and backs up SQLite to Cloudflare R2 via [Litestream](https://litestream.io). Gloss additionally runs a daily rclone sync of its scan images to R2.
 
-| App | Role | How it integrates with Gloss |
+| App | What it does | How it connects to Gloss |
 |---|---|---|
 | **[comms](https://github.com/nathan0colestock-code/comms)** | iMessage + Gmail + contacts hub | Gloss pushes contact profiles to Comms via `POST /api/gloss/contacts` when people are added/edited in gloss |
 | **[scribe](https://github.com/nathan0colestock-code/scribe)** | Collaborative document editor | Scribe links documents to gloss collections via `GET/POST /api/gloss-links/*` |
