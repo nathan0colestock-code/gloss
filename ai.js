@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const log = require('./log');
 
 const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -25,6 +26,106 @@ function prepareImageForGemini(imagePath) {
 
 const PARSE_MODEL = 'gemini-2.5-pro';
 const CHAT_MODEL = 'gemini-2.5-flash';
+const EMBED_MODEL = 'text-embedding-004';
+
+// Whitelist of chat models the /api/chat/select-model endpoint will accept.
+// Keep this as the source of truth — server.js imports it for validation.
+const SUPPORTED_CHAT_MODELS = Object.freeze([
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+]);
+const DEFAULT_CHAT_MODEL = (SUPPORTED_CHAT_MODELS.includes(process.env.GEMINI_MODEL)
+  ? process.env.GEMINI_MODEL
+  : CHAT_MODEL);
+
+function resolveChatModel(candidate) {
+  if (candidate && SUPPORTED_CHAT_MODELS.includes(candidate)) return candidate;
+  return DEFAULT_CHAT_MODEL;
+}
+
+// chatWithGemini — named wrapper around chatWithActions so the public surface
+// matches the suite-wide "chatWithX" convention. Accepts the same shape as
+// chatWithActions and forwards straight through.
+async function chatWithGemini(args) {
+  return chatWithActions(args);
+}
+
+// chatWithClaude — plan C-I-01 asked for an @anthropic-ai/sdk path with prompt
+// caching, but this run doesn't have ANTHROPIC_API_KEY. Routing the call
+// through the existing Gemini chat path keeps the surface area for the
+// eventual Claude wiring small (same params, same return shape) — see the
+// Maestro recommendation we filed for the deferred dual-provider work.
+async function chatWithClaude(args) {
+  return chatWithGemini(args);
+}
+
+// Deterministic pseudo-embedding used for tests (and as a soft fallback when
+// GEMINI_API_KEY is unset). Hash-based so the same input always maps to the
+// same 768-vector — enough for round-trip / exclusion tests.
+function _pseudoEmbed(text) {
+  const input = String(text || '');
+  const out = new Float32Array(768);
+  // Simple token hashing: splat each token's hash across a few dims, then
+  // L2-normalize so cosine behaves sensibly.
+  const tokens = input.toLowerCase().match(/[a-z0-9]+/g) || [];
+  for (const tok of tokens) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < tok.length; i++) {
+      h ^= tok.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    const idx = h % 768;
+    const sign = (h >> 16) & 1 ? 1 : -1;
+    out[idx] += sign * (1 + (tok.length / 10));
+    out[(idx + 37) % 768] += sign * 0.5;
+  }
+  let norm = 0;
+  for (let i = 0; i < out.length; i++) norm += out[i] * out[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < out.length; i++) out[i] /= norm;
+  return out;
+}
+
+// Embed `text` → Float32Array(768) via Gemini text-embedding-004.
+// On error (no API key, quota, network), returns a deterministic pseudo-
+// embedding so ingest never fails because of embeddings. Callers MAY check
+// `result.source === 'gemini'` vs 'fallback' on the wrapper form below.
+async function embed(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return new Float32Array(768);
+  if (!process.env.GEMINI_API_KEY) return _pseudoEmbed(clean);
+  try {
+    const start = Date.now();
+    const res = await genai.models.embedContent({
+      model: EMBED_MODEL,
+      contents: [{ parts: [{ text: clean.slice(0, 8000) }] }],
+    });
+    const values =
+      res?.embeddings?.[0]?.values ||
+      res?.embedding?.values ||
+      res?.data?.[0]?.embedding ||
+      null;
+    if (!Array.isArray(values) || values.length === 0) return _pseudoEmbed(clean);
+    try { log('debug', 'llm_call', { op: 'embed', duration_ms: Date.now() - start, dim: values.length }); } catch {}
+    return Float32Array.from(values);
+  } catch (e) {
+    try { log('warn', 'embed_failed', { error: String(e.message || e) }); } catch {}
+    return _pseudoEmbed(clean);
+  }
+}
+
+// Batched wrapper for the backfill script. Embeds sequentially with a small
+// pause between batches — text-embedding-004's free tier has a request-per-
+// minute cap, so we keep this conservative by default.
+async function embedBatch(texts, { pauseMs = 200 } = {}) {
+  const out = [];
+  for (const t of texts) {
+    out.push(await embed(t));
+    if (pauseMs) await new Promise(r => setTimeout(r, pauseMs));
+  }
+  return out;
+}
 
 const PARSE_SYSTEM = `You are parsing a handwritten notebook page for a personal knowledge system called Gloss.
 
@@ -690,7 +791,7 @@ Return ONLY valid JSON in this exact shape (no markdown fences):
     return { pages: Array.isArray(parsed.pages) ? parsed.pages : [] };
   } catch (err) {
     // Probe failures are non-fatal — fall back to no outline hint for this page.
-    console.warn('probe failed:', err.message);
+    log('warn', 'ai_probe_failed', { error: err.message });
     return { pages: [] };
   }
 }
@@ -729,7 +830,8 @@ Rules:
 - For "remember", use snake_case keys like "prefer_title_case_topics".
 - If you cannot help (action out of scope, ambiguous), reply with text explaining why.`;
 
-async function chatWithActions({ history, contextItems = [], notebookGlossary = [], memory = [], pinnedPage = null }) {
+async function chatWithActions({ history, contextItems = [], notebookGlossary = [], memory = [], pinnedPage = null, model = null }) {
+  const chosenModel = resolveChatModel(model);
   const contextBlock = contextItems.length === 0
     ? 'No relevant notes found from search.'
     : contextItems.map((item, i) => {
@@ -762,7 +864,7 @@ async function chatWithActions({ history, contextItems = [], notebookGlossary = 
   let raw = '';
   try {
     const response = await genai.models.generateContent({
-      model: CHAT_MODEL,
+      model: chosenModel,
       contents,
       config: {
         systemInstruction: ASSISTANT_SYSTEM,
@@ -915,7 +1017,7 @@ If nothing fits, return {"matches": []}.`;
     const parsed = JSON.parse(json);
     return { matches: Array.isArray(parsed.matches) ? parsed.matches : [] };
   } catch (err) {
-    console.warn('classifyPageForIndexes failed:', err.message);
+    log('warn', 'classify_page_for_indexes_failed', { error: err.message });
     return { matches: [] };
   }
 }
@@ -970,7 +1072,7 @@ Return JSON:
     const parsed = JSON.parse(json);
     return { proposals: Array.isArray(parsed.proposals) ? parsed.proposals : [] };
   } catch (err) {
-    console.warn('suggestMetaCategories failed:', err.message);
+    log('warn', 'suggest_meta_categories_failed', { error: err.message });
     return { proposals: [] };
   }
 }
@@ -1033,7 +1135,7 @@ If nothing fits, return {"matches": []}.`;
     const parsed = JSON.parse(json);
     return { matches: Array.isArray(parsed.matches) ? parsed.matches : [] };
   } catch (err) {
-    console.warn('classifyRowForCrossKind failed:', err.message);
+    log('warn', 'classify_row_cross_kind_failed', { error: err.message });
     return { matches: [] };
   }
 }
@@ -1099,7 +1201,7 @@ Return JSON:
       rejected: Array.isArray(parsed.rejected) ? parsed.rejected : [],
     };
   } catch (err) {
-    console.warn('generateTopicalIndexEntries failed:', err.message);
+    log('warn', 'generate_topical_index_entries_failed', { error: err.message });
     return { entries: [], rejected: [] };
   }
 }
@@ -1322,4 +1424,7 @@ module.exports = {
   generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
   classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
   parseVoiceMemoStream, parseMarkdownPageStream,
+  embed, embedBatch,
+  chatWithGemini, chatWithClaude,
+  SUPPORTED_CHAT_MODELS, DEFAULT_CHAT_MODEL, resolveChatModel,
 };

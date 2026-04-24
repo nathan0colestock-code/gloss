@@ -27,9 +27,16 @@ RUN set -eux; \
 WORKDIR /app
 
 # Install production deps against the lockfile first to keep the layer cache
-# from busting every time source changes.
+# from busting every time source changes. The sqlite-vec package ships its
+# extension via optional per-platform subpackages; npm resolves the matching
+# sqlite-vec-linux-x64 (or linux-arm64) at install time.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
+
+# Sanity-check: fail the build loudly if the sqlite-vec prebuilt binary for
+# this architecture is missing. Catches npm optionalDependencies regressions
+# at build time instead of at first search query in prod.
+RUN node -e "const p=require('sqlite-vec'); console.log('sqlite-vec binary OK:', p.getLoadablePath());"
 
 # App source. .dockerignore keeps data/, tests/, scripts/, .git, etc. out.
 COPY . .

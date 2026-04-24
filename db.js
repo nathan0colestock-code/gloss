@@ -11,6 +11,12 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// Vector search — sqlite-vec loaded best-effort. When the extension is
+// unavailable (arch mismatch, missing prebuilt binary), vec calls are no-ops
+// and FTS continues to work as the baseline.
+const vec = require('./vec');
+try { vec.ensure(db); } catch (_) { /* vec degrades to no-op */ }
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS pages (
     id TEXT PRIMARY KEY,
@@ -428,12 +434,28 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_ci ON headings(label COLLATE NOCASE);
 `);
+// Narrow migration wrapper — only swallow the specific SQLite errors that
+// mean "this migration already ran". Anything else (disk full, locked, etc.)
+// should still blow up so we notice. Mirrors the Maestro fix pattern.
+function safeMigrate(sql, expected) {
+  try {
+    db.exec(sql);
+    return true;
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    for (const needle of expected) {
+      if (msg.toLowerCase().includes(needle)) return false;
+    }
+    throw e; // unexpected — re-raise
+  }
+}
 // Migration: add scope to headings so collections and artifacts have separate heading pools.
-// try-catch is idempotent — SQLite throws "duplicate column name" if the column already exists.
-try { db.exec(`ALTER TABLE headings ADD COLUMN scope TEXT NOT NULL DEFAULT 'collection'`); } catch {}
+safeMigrate(
+  `ALTER TABLE headings ADD COLUMN scope TEXT NOT NULL DEFAULT 'collection'`,
+  ['duplicate column name']
+);
 // Drop the old label-only unique index; the new (label, scope) composite index takes its place.
-// try-catch: "no such index" on repeat runs is fine.
-try { db.exec(`DROP INDEX ux_headings_label_ci`); } catch {}
+safeMigrate(`DROP INDEX ux_headings_label_ci`, ['no such index']);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_scope_ci ON headings(label COLLATE NOCASE, scope)`);
 
 // Exclusions / inclusions for AI-curated user_indexes. An excluded entry is
@@ -1337,6 +1359,11 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 `);
+// Per-session model preference for /api/chat/select-model. Original suite
+// plan called for Claude-vs-Gemini routing; ANTHROPIC_API_KEY isn't
+// provisioned for this agent run, so we route between Gemini variants
+// (flash / pro) until that gets wired up. See Maestro recommendation.
+ensureColumn('chat_sessions', 'model', 'TEXT');
 
 function getMonthlySummary(ym) {
   return db.prepare(`SELECT year_month, summary, updated_at FROM monthly_summaries WHERE year_month = ?`).get(ym) || null;
@@ -2969,11 +2996,17 @@ function updateCommitment(id, { text, value_slug, status, start_date, target_dat
 // Unified list: projects + commitments, merged by start_date/target_date.
 // Each row: { kind, id, title, status, start_date, target_date, due_date,
 //             description, value_slug, parent_id, created_at }
+//
+// Projects were folded into `collections` (kind='project') by the migration
+// above. We read from collections as the source of truth; the legacy
+// `projects` table is left untouched so external introspection still works,
+// but new rows should only land in `collections`.
 function listCommitmentsTimeline() {
   const projects = db.prepare(`
     SELECT 'project' as kind, id, title, status, start_date, target_date, due_date,
-           description, NULL as value_slug, NULL as parent_id, created_at
-    FROM projects
+           description, NULL as value_slug, parent_id, created_at
+    FROM collections
+    WHERE kind = 'project'
   `).all();
   const commits = db.prepare(`
     SELECT 'commitment' as kind, id, text as title, status, start_date, target_date, due_date,
@@ -4708,6 +4741,20 @@ function deleteChatSession(id) {
   db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
   db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
 }
+// Persist the chosen chat model on a session. Caller validates the value;
+// we don't whitelist here so the db layer stays LLM-provider-agnostic.
+function setChatSessionModel(id, model) {
+  const now = new Date().toISOString();
+  const info = db.prepare(
+    `UPDATE chat_sessions SET model = ?, updated_at = ? WHERE id = ?`
+  ).run(model || null, now, id);
+  if (!info.changes) return null;
+  return db.prepare('SELECT * FROM chat_sessions WHERE id = ?').get(id);
+}
+function getChatSessionModel(id) {
+  const row = db.prepare('SELECT model FROM chat_sessions WHERE id = ?').get(id);
+  return row ? (row.model || null) : null;
+}
 function appendChatMessage({ session_id, role, body, proposal_json, status }) {
   const id = require('crypto').randomUUID();
   const now = new Date().toISOString();
@@ -5627,6 +5674,7 @@ module.exports = {
   getMonthlySummary, setMonthlySummary,
   // Phase 4.5 — chat assistant
   listChatSessions, getChatSession, createChatSession, touchChatSession, deleteChatSession,
+  setChatSessionModel, getChatSessionModel,
   appendChatMessage, getChatMessage, setChatMessageStatus,
   listChatMemory, setChatMemory, deleteChatMemory,
   // Phase 4 — Planning hub
@@ -5657,7 +5705,147 @@ module.exports = {
   getCrossKindContent, refreshContentHash, markLinksClassified, listCrossKindCandidates,
   // Markdown drafts
   createMarkdownDraft, listMarkdownDrafts, getMarkdownDraft, updateMarkdownDraft, deleteMarkdownDraft,
+  // Vector search
+  vecReady: () => vec.isReady(),
+  vecSet: (kind, id, v) => vec.set(kind, id, v),
+  vecRemove: (kind, id) => vec.remove(kind, id),
+  vecSearch: (v, opts) => vec.search(v, opts),
+  vecCount: (kind) => vec.count(kind),
+  hybridSearchPages, relatedPages,
+  listPagesForBackfill, listEntitiesForBackfill,
 };
+
+// ─── Hybrid search (FTS + vector) ──────────────────────────────────────────
+// Returns a ranked list of pages combining FTS5 and cosine similarity. Scores
+// are normalized [0..1] within this query and weighted 0.6 semantic + 0.4 FTS.
+// When no embedding is supplied, falls back to FTS-only.
+function hybridSearchPages(q, { queryVector = null, limit = 10 } = {}) {
+  const clean = String(q || '').trim();
+  const byId = new Map();
+
+  // FTS side.
+  if (clean) {
+    try {
+      const match = escapeFts(clean);
+      if (match) {
+        const rows = db.prepare(`
+          SELECT DISTINCT p.id, p.volume, p.page_number, p.scan_path, p.summary, p.captured_at,
+                 MIN(f.rank) AS rank
+          FROM items_fts f
+          JOIN items i ON i.rowid = f.rowid
+          JOIN pages p ON p.id = i.page_id
+          WHERE items_fts MATCH ?
+          GROUP BY p.id
+          ORDER BY rank
+          LIMIT ?
+        `).all(match, limit * 3);
+        // FTS rank is "smaller = better"; normalize inverse to [0..1].
+        if (rows.length) {
+          const ranks = rows.map(r => r.rank);
+          const minR = Math.min(...ranks);
+          const maxR = Math.max(...ranks);
+          const span = maxR - minR || 1;
+          for (const r of rows) {
+            const fts_score = 1 - ((r.rank - minR) / span);
+            byId.set(r.id, { ...r, fts_score, semantic_score: 0 });
+          }
+        }
+      }
+    } catch { /* FTS failure → fall through */ }
+  }
+
+  // Vector side.
+  if (queryVector && vec.isReady()) {
+    try {
+      const matches = vec.search(queryVector, { kind: 'pages', limit: limit * 3 });
+      if (matches.length) {
+        const dists = matches.map(m => m.distance);
+        const minD = Math.min(...dists);
+        const maxD = Math.max(...dists);
+        const span = maxD - minD || 1;
+        for (const m of matches) {
+          const semantic_score = 1 - ((m.distance - minD) / span);
+          const existing = byId.get(m.entity_id);
+          if (existing) {
+            existing.semantic_score = semantic_score;
+          } else {
+            const page = db.prepare(
+              'SELECT id, volume, page_number, scan_path, summary, captured_at FROM pages WHERE id=?'
+            ).get(m.entity_id);
+            if (page) byId.set(m.entity_id, { ...page, fts_score: 0, semantic_score });
+          }
+        }
+      }
+    } catch { /* vec failure → FTS only */ }
+  }
+
+  const merged = Array.from(byId.values()).map(r => ({
+    ...r,
+    score: 0.6 * (r.semantic_score || 0) + 0.4 * (r.fts_score || 0),
+  }));
+  merged.sort((a, b) => b.score - a.score);
+  return merged.slice(0, limit);
+}
+
+// Return top-N semantically similar pages to the given page. The caller
+// supplies the page's embedding; if vec isn't loaded we fall back to an empty
+// list so the UI can degrade cleanly.
+function relatedPages(pageId, pageVector, { limit = 3 } = {}) {
+  if (!pageVector || !vec.isReady()) return [];
+  const matches = vec.search(pageVector, {
+    kind: 'pages',
+    limit: limit + 1,
+    excludeEntityId: pageId,
+  });
+  const out = [];
+  for (const m of matches) {
+    if (m.entity_id === pageId) continue;
+    const page = db.prepare(
+      'SELECT id, volume, page_number, scan_path, summary, captured_at FROM pages WHERE id=?'
+    ).get(m.entity_id);
+    if (page) out.push({ ...page, distance: m.distance });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// Iterators for the backfill script. We page by created_at (pages) or rowid
+// (everything else) so resumption is idempotent.
+function listPagesForBackfill(afterId = null, batchSize = 100) {
+  if (afterId) {
+    return db.prepare(`
+      SELECT id, summary, raw_ocr_text FROM pages
+      WHERE id > ? ORDER BY id LIMIT ?
+    `).all(afterId, batchSize);
+  }
+  return db.prepare(`
+    SELECT id, summary, raw_ocr_text FROM pages ORDER BY id LIMIT ?
+  `).all(batchSize);
+}
+
+function listEntitiesForBackfill(kind, afterId = null, batchSize = 100) {
+  // Supports: collections, people, scripture_refs, books, artifacts, topics
+  const TABLES = {
+    collections: 'SELECT id, title AS label, summary AS text FROM collections',
+    people: 'SELECT id, label, NULL AS text FROM people',
+    scripture_refs: 'SELECT id, canonical AS label, NULL AS text FROM scripture_refs',
+    books: 'SELECT id, title AS label, author_label AS text FROM books',
+    artifacts: 'SELECT id, title AS label, notes AS text FROM artifacts',
+    topics: "SELECT id, label, NULL AS text FROM entities WHERE kind='topic'",
+  };
+  const base = TABLES[kind];
+  if (!base) throw new Error(`unknown kind: ${kind}`);
+  if (afterId) {
+    return db.prepare(`${base} AND id > ? ORDER BY id LIMIT ?`.replace(/AND/, kind === 'topics' ? 'AND' : 'WHERE')).all(afterId, batchSize);
+  }
+  // topics already has WHERE; for others, append ORDER BY directly.
+  if (kind === 'topics') {
+    if (afterId) return db.prepare(`${base} AND id > ? ORDER BY id LIMIT ?`).all(afterId, batchSize);
+    return db.prepare(`${base} ORDER BY id LIMIT ?`).all(batchSize);
+  }
+  if (afterId) return db.prepare(`${base} WHERE id > ? ORDER BY id LIMIT ?`).all(afterId, batchSize);
+  return db.prepare(`${base} ORDER BY id LIMIT ?`).all(batchSize);
+}
 
 // ─── Markdown drafts ────────────────────────────────────────────────────────
 function createMarkdownDraft({ id, content = '', date }) {
