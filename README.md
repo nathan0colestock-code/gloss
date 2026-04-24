@@ -1,10 +1,8 @@
 # Gloss
 
-A single-user, local-first companion to a paper bullet journal.
+Gloss turns your paper bullet journal into a searchable, linked database. Take a photo of a notebook page (or paste a voice memo transcript), and Gloss reads it with Gemini, pulls out the people, topics, scripture references, and collections you mentioned, and organises everything so you can search across months of handwritten notes in seconds.
 
-You scan notebook spreads (images or multi-page PDFs) or paste voice-memo transcripts. Gloss uses Gemini to parse each logical page into structured entries — entities, collections, scripture references, people — and gives you a searchable, threaded index of everything you've written by hand.
-
-Nothing stored in Gloss quotes your prose verbatim. Every entry is a pointer-summary back to the scan.
+Nothing stored in Gloss quotes your prose verbatim. Every entry is a pointer-summary back to the original scan.
 
 Part of a five-app personal suite: [maestro](https://github.com/nathan0colestock-code/maestro) · [comms](https://github.com/nathan0colestock-code/comms) · [scribe](https://github.com/nathan0colestock-code/scribe) · [black](https://github.com/nathan0colestock-code/black)
 
@@ -13,55 +11,55 @@ Part of a five-app personal suite: [maestro](https://github.com/nathan0colestock
 ## Surfaces
 
 ### Capture
-Upload scans (images or PDFs) or transcripts. Gloss parses each logical page into entities, collections, and references.
+Upload notebook scans (JPEG/PNG or multi-page PDF) or paste a voice-memo transcript. Gloss parses each logical page into structured entries. The 🎙️ button records audio in the browser, transcribes with Gemini, and streams entity chips (people, scripture, topics) in real time as they're confirmed.
 
 ![Capture interface with notebook upload and volume selector](docs/screenshots/capture.png)
 
 ### Log
-Calendar view of your notebook entries, organized by date. Click any day to see the pages you captured.
+Calendar view of all entries, organised by date. Click any day to see every page captured.
 
 ![April 2026 calendar showing entries per day](docs/screenshots/log.png)
 
 ### Index
-Browse collections, people, topics, scripture references, books, artifacts, and references. All auto-indexed and linked from your scans.
+Browse everything auto-extracted: collections, people, topics, scripture references, books, artifacts, and external references — all linked back to the originating page.
 
 ![Index view with tabs for collections, artifacts, people, topics, scripture, books, references](docs/screenshots/index.png)
 
 ### Research Briefing
-Capture → **✎ Briefing** opens `/research.html`. Type (or dictate) a topic; gloss searches your notebook + comms + black in parallel, optionally asks Gemini to weave a short narrative, and renders a print-friendly page with citations back to specific notebook spreads (e.g. "Notebook 3, page 14"). Designed for sermon prep — print it, go offline, write.
+Type or dictate a topic; Gloss searches your notebook, your messages ([Comms](https://github.com/nathan0colestock-code/comms)), and your file archive ([Black](https://github.com/nathan0colestock-code/black)) in parallel. Gemini weaves the results into a short narrative with citations back to specific notebook spreads (e.g. "Notebook 3, page 14"). Renders as a print-friendly page — designed for sermon prep.
 
-### View in Comms
-People with priority ≥ 1 on their detail page show a "View in Comms" link that deep-links into the matching contact profile in the comms app. Powered by the public `/api/suite-config` endpoint.
+### Chat
+Conversational interface over your notebook. Sessions are stored with their context so you can pick up threads across days. The chat has access to your full index — entities, collections, pages — and can cross-reference Comms contact history.
 
-### Voice memo recording
-🎙️ button on the Capture page records audio in the browser (`MediaRecorder`), uploads via `POST /api/ingest/voice-audio`, Gemini transcribes it, and the transcript runs through the existing voice-memo parse pipeline. Works on iOS Safari (audio/mp4) and Chrome/Android (audio/opus). Captures stream entity deltas live — people, scripture, topics — as Gemini confirms them.
+### Planning hub
+Mission, roles, habits, and long-range commitments tracked alongside your journal entries. Seed scripts populate a weekly Compass, roles/areas structure, and a planning hub with mission and habit tracking.
 
 ### Promote to Scribe
-Any note's detail view has a **→ New Scribe version** button. It creates a new Scribe document seeded with the page's summary + raw text and tagged as a version of the originating gloss page. Subsequent promotions show up as `v1 · v2 · …` chips that deep-link back to each Scribe doc.
+Any note's detail view has a **→ New Scribe version** button. Creates a [Scribe](https://github.com/nathan0colestock-code/scribe) document seeded with the page's summary and raw text. Subsequent promotions appear as `v1 · v2 · …` chips.
 
-### Live entity extraction on voice + markdown captures
-Voice memos and typed markdown captures stream entity extraction in real time — chips appear inline as Gemini confirms them, rather than waiting for the whole parse. Image scans keep the current async flow (too expensive to block on).
+### View in Comms
+People with `priority >= 1` show a "View in Comms" link on their detail page, deep-linking to their [Comms](https://github.com/nathan0colestock-code/comms) contact profile.
 
-### Mobile formatting toolbar
-Markdown textarea on mobile gets a sticky bottom toolbar: **B / I / H1 / H2 / • / ☐ / 🔗**. iOS auto-zoom fixed (inputs now ≥ 16px on mobile).
+### Special dates
+Birthday and anniversary tracking integrated into the people index, surfaced in weekly reviews.
 
 ---
 
 ## Stack
 
-- **Server:** Node.js + Express
-- **Database:** SQLite via `better-sqlite3` (WAL + FTS5)
-- **AI:** Google Gemini (`gemini-2.5-pro` for parse, `gemini-2.5-flash` for probe/chat)
-- **Frontend:** Single vanilla-JS file (`public/index.html`) — no framework, no build step
-- **PDF rendering:** Poppler (`pdftoppm` + `pdfinfo`)
+- Node.js + Express
+- SQLite via `better-sqlite3` (WAL + FTS5 full-text search)
+- Google Gemini (`gemini-2.5-pro` for parse, `gemini-2.5-flash` for probe/chat)
+- Single vanilla-JS frontend (`public/index.html`) — no framework, no build step
+- Poppler (`pdftoppm` + `pdfinfo`) for PDF rendering
+- Deployed to [Fly.io](https://fly.io); SQLite replicated to Cloudflare R2 via [Litestream](https://litestream.io)
 
 ---
 
 ## Prerequisites
 
 - Node.js 20+
-- [Poppler](https://poppler.freedesktop.org/) — `pdftoppm` and `pdfinfo` must be on PATH
-  - macOS: `brew install poppler`
+- [Poppler](https://poppler.freedesktop.org/) — `brew install poppler` on macOS
 - A [Gemini API key](https://aistudio.google.com/apikey)
 
 ---
@@ -70,107 +68,93 @@ Markdown textarea on mobile gets a sticky bottom toolbar: **B / I / H1 / H2 / �
 
 ```bash
 git clone <repo-url>
-cd gloss
-npm install
-cp .env.example .env
-# Edit .env and set GEMINI_API_KEY
-npm run dev
+cd gloss && npm install
+cp .env.example .env   # set GEMINI_API_KEY
+npm run dev            # server on :3747
 ```
 
-The server starts on port 3747 (or `PORT` from `.env`). The `data/` directory (database, scans, uploads) is created automatically on first run.
+The `data/` directory (database, scans, uploads) is created on first run and gitignored.
 
 ---
 
 ## Configuration
 
-See [`.env.example`](.env.example) for all options. Required:
-
 | Variable | Description |
 |---|---|
-| `GEMINI_API_KEY` | Required. Powers all parse, reexamine, and chat calls. |
+| `GEMINI_API_KEY` | Required. |
 | `PORT` | Optional. Defaults to `3747`. |
-| `GOOGLE_OAUTH_CLIENT_JSON` | Optional. Path to OAuth client JSON for Google Docs/Drive content fetch on artifacts and references. |
+| `COMMS_URL` + `COMMS_API_KEY` | Optional. Enables contact push and cross-search in briefings. |
+| `GOOGLE_OAUTH_CLIENT_JSON` | Optional. Path to OAuth JSON for Drive/Docs content fetch. |
 
 ---
 
 ## Comms integration (optional)
 
-If you also run [Comms](https://github.com/nathan0colestock-code/comms) — the iMessage + Gmail + Calendar
-aggregator — Gloss can push priority people (anyone with
-`priority >= 1` on their profile) to it on a 15-minute interval. Comms
-uses the push to show per-person notebook context, generate AI
-insights, and prep meeting briefs for calendar events whose attendees
-appear in your notebook.
+When set, Gloss pushes people with `priority >= 1` to Comms every 15 minutes. Comms uses the push to show notebook context on contact profiles and generate pre-meeting briefs.
 
-Enable by setting both variables in `.env`:
+A `comms` pill in the sidebar shows push status (green / amber / red). `/api/comms/status` exposes the same as JSON.
 
-```
-COMMS_URL=http://localhost:3748
-COMMS_API_KEY=<bearer key from Comms .env>
-```
+---
 
-A small `comms` pill appears in the sidebar when the push is
-configured — green for recent success, amber for stale, red for last
-error. `/api/comms/status` exposes the same snapshot as JSON.
+## Google Drive polling (optional)
+
+If Google OAuth is configured, Gloss polls configured Drive folders on startup and on an interval. New Docs, Sheets, or PDFs are imported automatically. `fetched_at` and `fetched_error` are tracked per item.
+
+---
+
+## Ingest pipeline
+
+1. PDF pages rendered to PNG at 220 dpi via `pdftoppm`
+2. Each page probed cheaply for headers and page numbers
+3. `gemini-2.5-pro` parses each logical page into structured entries
+4. Entities (people, topics, scripture, collections) upserted and linked
+5. Threading markers (`continued from / to`) detected and applied
+6. Auto-classification into any matching user indexes
+
+Voice captures stream entity deltas live as Gemini confirms them.
 
 ---
 
 ## One-shot seed scripts
 
-Run these once on a fresh database (start the server first so the DB file is created):
-
 ```bash
-node seed-compass.js               # Weekly Compass values + long-range commitments
-node scripts/seed_roles_volume.js  # Roles/Areas entities + Volume D page tags
+node seed-compass.js                   # Weekly Compass values + commitments
+node scripts/seed_roles_volume.js      # Roles/Areas entities + Volume page tags
 node scripts/seed_compass_planning.js  # Planning hub: mission, habits, relationships
 ```
 
-All three are idempotent — safe to re-run.
+All idempotent — safe to re-run.
 
 ---
 
 ## Project layout
 
 ```
-server.js          HTTP server, ingest pipeline, chat assistant, planning hub
-db.js              Schema + every data function (no ORM)
-ai.js              Gemini calls (parse / reexamine / voice / probe / chat)
+server.js          HTTP server, ingest, chat, planning hub, briefing, Drive polling
+db.js              Schema + all data functions
+ai.js              Gemini calls (parse / reexamine / voice / probe / chat / briefing)
 google.js          OAuth + Google Docs/Drive text export
 public/index.html  Entire frontend (one file)
-seed-compass.js    One-shot seed script
-scripts/           Additional one-shot utilities
 data/              Created at runtime — database, scans, uploads (gitignored)
+docs/INTEGRATIONS/ Integration contracts with sibling apps
 ```
-
----
-
-## Ingest
-
-Drop a scan (JPEG/PNG or PDF) or paste a voice-memo transcript through the UI. The pipeline:
-
-1. PDF pages are rendered to PNG via `pdftoppm` at 220 dpi
-2. Each page is probed cheaply for headers and page numbers
-3. `gemini-2.5-pro` parses each logical page into structured entries
-4. Entities (people, topics, scripture, collections) are upserted and linked
-5. Threading markers (`continued from / to`) are detected and applied
-6. Auto-classification files pages into any matching user indexes
 
 ---
 
 ## Suite siblings
 
-Gloss is the **personal knowledge graph** node of a five-app personal suite. The apps are independent processes that talk over HTTP with Bearer auth; each runs on [Fly.io](https://fly.io) and backs up SQLite to Cloudflare R2 via [Litestream](https://litestream.io). Gloss additionally runs a daily rclone sync of its scan images to R2.
+Gloss is the **personal knowledge graph** node of a five-app personal suite. Independent processes, all on [Fly.io](https://fly.io), all backed up to Cloudflare R2 via [Litestream](https://litestream.io). Scan images also sync to R2 daily via rclone.
 
 | App | What it does | How it connects to Gloss |
 |---|---|---|
-| **[comms](https://github.com/nathan0colestock-code/comms)** | iMessage + Gmail + contacts hub | Gloss pushes contact profiles to Comms via `POST /api/gloss/contacts` when people are added/edited in gloss |
-| **[scribe](https://github.com/nathan0colestock-code/scribe)** | Collaborative document editor | Scribe links documents to gloss collections via `GET/POST /api/gloss-links/*` |
-| **[black](https://github.com/nathan0colestock-code/black)** | Personal file search (Drive, Evernote, iCloud → indexed) | Black search results can deep-link to matching gloss pages |
-| **[maestro](https://github.com/nathan0colestock-code/maestro)** | Overnight orchestration (capture → worker → test → merge → deploy) | Maestro polls `GET /api/status` and can dispatch feature sets that touch Gloss |
+| **[comms](https://github.com/nathan0colestock-code/comms)** | iMessage + Gmail + contacts hub | Gloss pushes contact profiles; Comms returns timeline data for briefings |
+| **[scribe](https://github.com/nathan0colestock-code/scribe)** | Collaborative document editor | "Promote to Scribe" creates docs from gloss pages; Scribe links documents back to gloss collections |
+| **[black](https://github.com/nathan0colestock-code/black)** | Personal file search (Drive, Evernote, iCloud) | Black results deep-link to matching gloss pages; briefings query Black in parallel |
+| **[maestro](https://github.com/nathan0colestock-code/maestro)** | Overnight code orchestration | Polls `/api/status`; dispatches feature sets; proxies voice captures via `/api/gloss/voice` |
 
-All five apps expose a suite-standard `GET /api/status` returning `{ app, version, ok, uptime_seconds, metrics }`, protected by Bearer auth using either the app's own `API_KEY` or a shared `SUITE_API_KEY`.
+All five apps expose `GET /api/status` → `{ app, version, ok, uptime_seconds, metrics }`, Bearer-authed.
 
-Integration contracts between pairs of apps live in `docs/INTEGRATIONS/` in the primary repo for each contract.
+Integration contracts live in `docs/INTEGRATIONS/` in the primary repo for each contract.
 
 ---
 

@@ -392,6 +392,49 @@ app.get('/api/status', requireBearer, (req, res) => {
   });
 });
 
+// ── /api/telemetry/nightly ─────────────────────────────────────────────────
+// Richer health + quality signals for Maestro's nightly improvement agent.
+// Every query is wrapped so a bad table can't flap the endpoint.
+app.get('/api/telemetry/nightly', requireBearer, (req, res) => {
+  const handle = (db.handle && typeof db.handle === 'function') ? db.handle() : null;
+  const runCount = (sql) => {
+    try {
+      if (!handle) return 0;
+      const row = handle.prepare(sql).get();
+      if (!row) return 0;
+      const v = Object.values(row)[0];
+      return typeof v === 'number' ? v : Number(v) || 0;
+    } catch { return 0; }
+  };
+  const metrics = {
+    total_pages:         runCount('SELECT COUNT(*) AS n FROM pages'),
+    pages_last_7d:       runCount("SELECT COUNT(*) AS n FROM pages WHERE date(created_at) >= date('now','-7 day')"),
+    pages_last_24h:      runCount("SELECT COUNT(*) AS n FROM pages WHERE date(created_at) >= date('now','-1 day')"),
+    total_people:        runCount('SELECT COUNT(*) AS n FROM people'),
+    total_collections:   runCount('SELECT COUNT(*) AS n FROM collections'),
+    backlog_pending:     runCount("SELECT COUNT(*) AS n FROM backlog_items WHERE status='pending'"),
+    backlog_answered_7d: runCount("SELECT COUNT(*) AS n FROM backlog_items WHERE status='answered' AND date(updated_at) >= date('now','-7 day')"),
+    ingest_failures_7d:  runCount("SELECT COUNT(*) AS n FROM ingest_failures WHERE date(created_at) >= date('now','-7 day')"),
+    chat_sessions_7d:    runCount("SELECT COUNT(*) AS n FROM chat_sessions WHERE date(created_at) >= date('now','-7 day')"),
+    chat_messages_7d:    runCount("SELECT COUNT(*) AS n FROM chat_messages WHERE date(created_at) >= date('now','-7 day')"),
+    chat_memory_size:    runCount('SELECT COUNT(*) AS n FROM chat_memory'),
+    markdown_drafts:     runCount('SELECT COUNT(*) AS n FROM markdown_drafts'),
+  };
+  const health = {
+    coverage_gap_7d:  metrics.pages_last_7d === 0,
+    backlog_overload: metrics.backlog_pending > 25,
+    ingest_flapping:  metrics.ingest_failures_7d > 5,
+  };
+  res.json({
+    app: 'gloss',
+    date: new Date().toISOString().slice(0, 10),
+    version: APP_VERSION,
+    uptime_seconds: Math.floor(process.uptime()),
+    metrics,
+    health,
+  });
+});
+
 app.get('/login', (req, res) => {
   const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';
   res.type('html').send(`<!doctype html><meta charset=utf-8><title>Gloss · Sign in</title>
