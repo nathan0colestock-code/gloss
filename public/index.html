@@ -968,36 +968,87 @@ body.has-detail .tree-row-actions { display: none; }
  * focus (it zooms whenever focused input font-size resolves < 16px). */
 textarea.md-editor { font-size: 12.5px; }
 
-/* Sticky formatting toolbar. Visible only on mobile AND only while the
- * associated md-editor has focus (JS toggles `.md-toolbar-show` on <body>).
- * Lives above the keyboard on iOS via position:sticky + the bottom
- * safe-area inset. Hidden on desktop entirely. */
+/* Editor wrapper — outer chrome that houses the toolbar strip + textarea as
+ * one unit. Provides the focus ring at the wrapper level so the border lights
+ * up regardless of whether focus is on the textarea or a toolbar button. */
+.md-editor-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  overflow: hidden;
+  transition: border-color var(--t), box-shadow var(--t);
+}
+.md-editor-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.md-editor-wrap textarea.md-editor {
+  border: none !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Formatting toolbar — desktop: always-visible strip at the top of the editor
+ * wrapper. Mobile: overridden to sticky-bottom above the keyboard. */
 .md-toolbar {
-  display: none;
-  position: sticky;
-  bottom: 0;
-  left: 0; right: 0;
-  z-index: 50;
-  gap: 4px;
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom)) 8px;
-  background: var(--paper);
-  border-top: 1px solid var(--rule);
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--rule);
+  align-items: center;
 }
 .md-toolbar button {
   flex: 0 0 auto;
-  min-width: 40px;
-  min-height: 36px;
-  padding: 6px 10px;
+  padding: 3px 7px;
   font-family: var(--font-mono);
-  font-size: 14px;
-  background: var(--paper-2);
-  border: 1px solid var(--rule);
+  font-size: 11.5px;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--r);
-  color: var(--ink);
+  color: var(--ink-soft);
+  cursor: pointer;
+  min-height: 22px;
+  line-height: 1;
+  white-space: nowrap;
 }
-.md-toolbar button:active { background: var(--paper-3); }
+.md-toolbar button:hover { background: var(--paper-3); border-color: var(--rule); color: var(--ink); }
+.md-toolbar button:active,
+.md-toolbar button.tb-active { background: var(--paper-3); border-color: var(--rule); color: var(--accent); }
+.md-toolbar .tb-sep { width: 1px; height: 14px; background: var(--rule); margin: 0 2px; align-self: center; flex: 0 0 auto; }
+
+/* Split preview panel — shown alongside textarea when Preview is toggled on */
+.md-editor-preview { display: none; }
+.md-editor-wrap.preview-on {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr 1fr;
+}
+.md-editor-wrap.preview-on .md-toolbar { grid-column: 1 / -1; }
+.md-editor-wrap.preview-on textarea.md-editor { border-right: 1px solid var(--rule) !important; }
+.md-editor-wrap.preview-on .md-editor-preview {
+  display: block;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: var(--paper);
+  max-height: 420px;
+}
+
+/* Word/char count status bar below the editor */
+.md-editor-status {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
 .day-tile .thumb.md {
   font-family: var(--font-mono);
   font-size: 20px;
@@ -1815,7 +1866,42 @@ body > *:not(#boot-splash) { transition: opacity 240ms var(--ease-decel); }
   .pill, .btn-ghost { min-height: 36px; padding: 8px 12px; }
   .input, textarea.input, select.input { padding: 10px 12px; font-size: 16px; }  /* 16px to prevent iOS zoom on focus */
   textarea.md-editor { font-size: 16px; }  /* markdown editor overrides default 12.5px — iOS zoom guard */
+  /* On mobile, un-wrap the editor chrome and revert the toolbar to its
+   * sticky-bottom-above-keyboard position, visible only while the textarea
+   * has focus (JS toggles body.md-toolbar-show). */
+  .md-editor-wrap { border: none; border-radius: 0; overflow: visible; margin-top: 0; }
+  .md-editor-wrap:focus-within { box-shadow: none; border-color: transparent; }
+  .md-editor-wrap textarea.md-editor {
+    border: 1px solid var(--rule) !important;
+    border-radius: var(--r) !important;
+    margin-top: 10px !important;
+  }
+  .md-editor-wrap textarea.md-editor:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent) !important;
+  }
+  .md-toolbar {
+    display: none;
+    position: sticky;
+    bottom: 0;
+    left: 0; right: 0;
+    z-index: 50;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom)) 8px;
+    background: var(--paper);
+    border-top: 1px solid var(--rule);
+    border-bottom: none;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .md-toolbar button { min-width: 36px; min-height: 36px; padding: 6px 10px; font-size: 14px; }
   body.md-toolbar-show .md-toolbar { display: flex; }
+  /* Disable split preview on mobile — stack vertically instead */
+  .md-editor-wrap.preview-on { display: flex; flex-direction: column; }
+  .md-editor-wrap.preview-on .md-toolbar { grid-column: unset; }
+  .md-editor-wrap.preview-on textarea.md-editor { border-right: none !important; }
+  .md-editor-wrap.preview-on .md-editor-preview { max-height: 200px; }
   .icon-btn { width: 40px; height: 40px; }
 
   /* Surface headings */
@@ -3806,10 +3892,10 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       class: 'input md-editor',
       rows: 20,
       placeholder: '# On catechesis\n\nScaffolding, not cage. Three notes:\n\n- formation moves slow\n- repetition is not rote\n- the liturgy teaches',
-      // Note: font-size is set via CSS (.md-editor) so the mobile media query
-      // can override it to 16px and avoid iOS auto-zoom on focus. Inline
-      // fontSize here would defeat that.
-      style: { fontFamily: 'var(--font-mono)', width: '100%', boxSizing: 'border-box', marginTop: '10px', resize: 'vertical' },
+      // font-size is set via CSS (.md-editor) so the mobile media query can
+      // bump it to 16px and avoid iOS auto-zoom. Do not set it inline.
+      // width/margin/box-sizing are managed by .md-editor-wrap CSS.
+      style: { fontFamily: 'var(--font-mono)' },
     });
     ta.value = draft.content;
 
@@ -3900,17 +3986,30 @@ function openDraftDetail(draftId, listEl, backlogHost) {
       if (listEl) await refreshDraftList(listEl, backlogHost);
     });
 
-    // Mobile-only sticky formatting toolbar. Hidden on desktop via CSS; on
-    // mobile, shown only while the textarea has focus. Tapping a button wraps
-    // the current selection in the corresponding markdown syntax, or inserts
-    // a placeholder at the cursor if there's no selection. Uses execCommand
-    // so the browser's undo stack stays intact.
-    const toolbar = attachMarkdownToolbar(ta);
+    // Formatting toolbar + preview panel. On desktop, the toolbar is a
+    // permanent strip at the top of the editor wrapper; on mobile it reverts
+    // to sticky-bottom above the keyboard.
+    const { toolbar, previewPanel } = attachMarkdownToolbar(ta);
+
+    // Word / character count status bar.
+    const statusBar = h('div', { class: 'md-editor-status' });
+    const updateStatus = () => {
+      const text = ta.value;
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      statusBar.textContent = `${words} word${words !== 1 ? 's' : ''} · ${text.length} char${text.length !== 1 ? 's' : ''}`;
+    };
+    updateStatus();
+    ta.addEventListener('input', updateStatus);
+
+    // Editor wrapper provides outer border + focus ring on desktop; on mobile
+    // the wrapper is borderless and the textarea carries its own border.
+    const editorWrap = h('div', { class: 'md-editor-wrap' });
+    editorWrap.append(toolbar, ta, previewPanel);
 
     body.append(
       h('div', { class: 'draft-detail-header' }, h('span', { class: 'lbl-mono' }, 'Date'), dateIn),
-      ta,
-      toolbar,
+      editorWrap,
+      statusBar,
       h('div', { class: 'lbl-mono', style: { marginTop: '14px', marginBottom: '4px' } }, 'File as'),
       fileModeBar,
       filingDetail,
@@ -3921,66 +4020,225 @@ function openDraftDetail(draftId, listEl, backlogHost) {
   });
 }
 
-// Build a sticky bottom formatting toolbar bound to a <textarea>. The toolbar
-// itself is always rendered; CSS scopes it to mobile viewports (≤640px) and
-// JS toggles `body.md-toolbar-show` while the textarea has focus so it only
-// appears above the on-screen keyboard when the user is actually typing.
-// Each button wraps the current selection (or inserts a template at the
-// cursor) using document.execCommand('insertText') so the native undo stack
-// stays intact — no dependency on contentEditable/TipTap/etc.
+// Build a formatting toolbar + preview panel bound to a <textarea>.
+// On desktop, the toolbar is a permanent strip at the top of .md-editor-wrap.
+// On mobile, CSS reverts it to a sticky-bottom strip shown only while the
+// textarea has focus (JS toggles body.md-toolbar-show).
+// Returns { toolbar, previewPanel } — the caller places both inside
+// .md-editor-wrap with toolbar first.
 function attachMarkdownToolbar(ta) {
-  const toolbar = h('div', { class: 'md-toolbar', role: 'toolbar' });
-  const apply = (before, after, placeholder) => {
-    const start = ta.selectionStart, end = ta.selectionEnd;
-    const selected = ta.value.slice(start, end);
-    const inner = selected || placeholder || '';
-    const insert = `${before}${inner}${after}`;
+  const toolbar = h('div', { class: 'md-toolbar', role: 'toolbar', 'aria-label': 'Formatting' });
+  const previewPanel = h('div', { class: 'md-editor-preview md-frame' });
+
+  // Low-level text insertion that preserves the browser undo stack.
+  const insertText = (text, start, end) => {
     ta.focus();
     ta.setSelectionRange(start, end);
-    if (!document.execCommand('insertText', false, insert)) {
-      ta.setRangeText(insert, start, end, 'end');
+    if (!document.execCommand('insertText', false, text)) {
+      ta.setRangeText(text, start, end, 'end');
     }
-    // Place the caret at the inner text so the user can immediately overtype.
-    const innerStart = start + before.length;
-    ta.setSelectionRange(innerStart, innerStart + inner.length);
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   };
-  const linePrefix = (prefix) => {
-    const start = ta.selectionStart;
-    const value = ta.value;
-    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-    ta.focus();
-    ta.setSelectionRange(lineStart, lineStart);
-    if (!document.execCommand('insertText', false, prefix)) {
-      ta.setRangeText(prefix, lineStart, lineStart, 'end');
+
+  // Wrap selection with before/after. Detects whether the selection is already
+  // wrapped and toggles it off in that case (smart toggle).
+  const toggleWrap = (before, after, placeholder) => {
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const selected = ta.value.slice(start, end);
+    const bLen = before.length, aLen = after.length;
+    const alreadyWrapped = start >= bLen && end <= ta.value.length - aLen &&
+      ta.value.slice(start - bLen, start) === before &&
+      ta.value.slice(end, end + aLen) === after;
+    if (alreadyWrapped) {
+      insertText(selected, start - bLen, end + aLen);
+      ta.setSelectionRange(start - bLen, end - bLen);
+      return;
     }
-    const newPos = start + prefix.length;
+    const inner = selected || placeholder || '';
+    insertText(`${before}${inner}${after}`, start, end);
+    ta.setSelectionRange(start + bLen, start + bLen + inner.length);
+  };
+
+  // Toggle a line prefix (e.g. '# ', '- ', '> ') across all selected lines.
+  // If every line already has the prefix, removes it (toggle off).
+  const toggleLinePrefix = (prefix) => {
+    const val = ta.value;
+    const selStart = ta.selectionStart, selEnd = ta.selectionEnd;
+    const blockStart = val.lastIndexOf('\n', selStart - 1) + 1;
+    const rawEnd = val.indexOf('\n', selEnd);
+    const blockEnd = rawEnd === -1 ? val.length : rawEnd;
+    const lines = val.slice(blockStart, blockEnd).split('\n');
+    const allHave = lines.every(l => l.startsWith(prefix));
+    const transformed = allHave
+      ? lines.map(l => l.slice(prefix.length)).join('\n')
+      : lines.map(l => prefix + l).join('\n');
+    insertText(transformed, blockStart, blockEnd);
+    const delta = (allHave ? -1 : 1) * prefix.length;
+    const newPos = Math.max(blockStart, selStart + delta);
     ta.setSelectionRange(newPos, newPos);
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
   };
-  const buttons = [
-    ['B',   () => apply('**', '**', 'bold'),           'Bold'],
-    ['I',   () => apply('*',  '*',  'italic'),         'Italic'],
-    ['H1',  () => linePrefix('# '),                    'Heading 1'],
-    ['H2',  () => linePrefix('## '),                   'Heading 2'],
-    ['•',   () => linePrefix('- '),                    'Bullet list'],
-    ['☐',   () => linePrefix('- [ ] '),                'Checklist'],
-    ['🔗',  () => apply('[', '](url)', 'link text'),   'Link'],
-  ];
-  for (const [label, handler, title] of buttons) {
+
+  // Refresh the preview panel (no-op when preview is not active).
+  const updatePreview = () => {
+    const wrap = toolbar.closest('.md-editor-wrap');
+    if (wrap && wrap.classList.contains('preview-on')) {
+      previewPanel.innerHTML = renderMarkdown(ta.value) || '<p class="soft">(empty)</p>';
+    }
+  };
+  ta.addEventListener('input', updatePreview);
+
+  // Helper to create toolbar buttons. mousedown is prevented so clicking a
+  // button doesn't steal focus from the textarea.
+  const mkBtn = (label, handler, title, cls) => {
     const btn = h('button', { type: 'button', title, onmousedown: (e) => e.preventDefault() }, label);
-    btn.addEventListener('click', (e) => { e.preventDefault(); handler(); });
-    toolbar.appendChild(btn);
-  }
+    if (cls) btn.classList.add(cls);
+    btn.addEventListener('click', (e) => { e.preventDefault(); handler(btn); });
+    return btn;
+  };
+  const sep = () => h('div', { class: 'tb-sep', role: 'separator' });
+
+  // --- Inline formatting ---
+  toolbar.append(
+    mkBtn('B',  () => toggleWrap('**', '**', 'bold'),          'Bold (⌘B)'),
+    mkBtn('I',  () => toggleWrap('*',  '*',  'italic'),        'Italic (⌘I)'),
+    mkBtn('~~', () => toggleWrap('~~', '~~', 'strikethrough'), 'Strikethrough (⌘⇧X)'),
+    mkBtn('`',  () => toggleWrap('`',  '`',  'code'),          'Inline code'),
+    sep(),
+    // --- Block formatting ---
+    mkBtn('H1', () => toggleLinePrefix('# '),   'Heading 1'),
+    mkBtn('H2', () => toggleLinePrefix('## '),  'Heading 2'),
+    mkBtn('H3', () => toggleLinePrefix('### '), 'Heading 3'),
+    sep(),
+    mkBtn('•',  () => toggleLinePrefix('- '),       'Bullet list'),
+    mkBtn('1.', () => toggleLinePrefix('1. '),      'Ordered list'),
+    mkBtn('☐',  () => toggleLinePrefix('- [ ] '),   'Checklist'),
+    mkBtn('❝',  () => toggleLinePrefix('> '),        'Blockquote'),
+    sep(),
+    // --- Insert blocks ---
+    mkBtn('```', () => {
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      const selected = ta.value.slice(start, end);
+      const inner = selected || 'code here';
+      const insert = '```\n' + inner + '\n```';
+      insertText(insert, start, end);
+      ta.setSelectionRange(start + 4, start + 4 + inner.length);
+    }, 'Code block'),
+    mkBtn('🔗', () => {
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      const selected = ta.value.slice(start, end) || 'link text';
+      const insert = `[${selected}](url)`;
+      insertText(insert, start, end);
+      // Select the placeholder URL so the user can immediately type the real one.
+      const urlStart = start + selected.length + 3;
+      ta.setSelectionRange(urlStart, urlStart + 3);
+    }, 'Link (⌘K)'),
+    mkBtn('—', () => {
+      const pos = ta.selectionStart;
+      const val = ta.value;
+      const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+      const atLineStart = pos === lineStart;
+      const rule = atLineStart ? '---\n' : '\n---\n';
+      insertText(rule, pos, pos);
+      ta.setSelectionRange(pos + rule.length, pos + rule.length);
+    }, 'Horizontal rule'),
+  );
+
+  // Preview toggle — pushed to the right with a flex spacer.
+  const previewBtn = mkBtn('Preview', (btn) => {
+    const wrap = btn.closest('.md-editor-wrap');
+    if (!wrap) return;
+    const on = wrap.classList.toggle('preview-on');
+    btn.textContent = on ? 'Close preview' : 'Preview';
+    btn.classList.toggle('tb-active', on);
+    if (on) updatePreview();
+  }, 'Toggle split preview');
+  toolbar.append(h('div', { style: { flex: '1' } }), previewBtn);
+
+  // --- Keyboard shortcuts ---
+  ta.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+
+    if (mod && !e.shiftKey && e.key === 'b') { e.preventDefault(); toggleWrap('**', '**', 'bold'); return; }
+    if (mod && !e.shiftKey && e.key === 'i') { e.preventDefault(); toggleWrap('*', '*', 'italic'); return; }
+    if (mod && !e.shiftKey && e.key === 'k') {
+      e.preventDefault();
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      const selected = ta.value.slice(start, end) || 'link text';
+      const insert = `[${selected}](url)`;
+      insertText(insert, start, end);
+      const urlStart = start + selected.length + 3;
+      ta.setSelectionRange(urlStart, urlStart + 3);
+      return;
+    }
+    if (mod && e.shiftKey && (e.key === 'x' || e.key === 'X')) {
+      e.preventDefault(); toggleWrap('~~', '~~', 'strikethrough'); return;
+    }
+
+    // Tab → indent 2 spaces; Shift+Tab → remove leading 2 spaces.
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = ta.selectionStart;
+      const val = ta.value;
+      if (e.shiftKey) {
+        const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+        if (val.slice(lineStart, lineStart + 2) === '  ') {
+          insertText(val.slice(lineStart + 2, start), lineStart, start);
+          ta.setSelectionRange(Math.max(lineStart, start - 2), Math.max(lineStart, start - 2));
+        }
+      } else {
+        insertText('  ', start, start);
+        ta.setSelectionRange(start + 2, start + 2);
+      }
+      return;
+    }
+
+    // Enter → continue the current list/blockquote prefix; two Enters exit.
+    if (e.key === 'Enter' && !mod && !e.shiftKey) {
+      const val = ta.value;
+      const pos = ta.selectionStart;
+      const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+      const currentLine = val.slice(lineStart, pos);
+
+      const bulletM  = currentLine.match(/^(\s*)([-*+])\s+(\[[ xX]\]\s+)?/);
+      const orderedM = currentLine.match(/^(\s*)(\d+)\.\s+/);
+      const quoteM   = currentLine.match(/^(>\s?)/);
+      if (!bulletM && !orderedM && !quoteM) return;
+
+      const fullPrefix = bulletM ? bulletM[0] : orderedM ? orderedM[0] : quoteM[0];
+      if (currentLine.trim() === fullPrefix.trim()) {
+        // Line is just the prefix — exit the list on a second Enter.
+        e.preventDefault();
+        insertText('\n', lineStart, pos);
+        ta.setSelectionRange(lineStart + 1, lineStart + 1);
+        return;
+      }
+
+      e.preventDefault();
+      let next;
+      if (orderedM) {
+        next = `${orderedM[1]}${parseInt(orderedM[2], 10) + 1}. `;
+      } else if (bulletM) {
+        const isTask = !!bulletM[3];
+        next = `${bulletM[1]}${bulletM[2]} ${isTask ? '[ ] ' : ''}`;
+      } else {
+        next = quoteM[1];
+      }
+      insertText('\n' + next, pos, pos);
+      ta.setSelectionRange(pos + 1 + next.length, pos + 1 + next.length);
+    }
+  });
+
+  // Mobile: show/hide the sticky toolbar on textarea focus/blur.
   ta.addEventListener('focus', () => document.body.classList.add('md-toolbar-show'));
   ta.addEventListener('blur',  () => {
-    // Delay so a toolbar-button tap (which briefly blurs the textarea) doesn't
-    // flicker the toolbar away between mousedown and click.
+    // Delay 100 ms so tapping a toolbar button (which briefly blurs the
+    // textarea) doesn't flicker the toolbar away before the click fires.
     setTimeout(() => {
       if (document.activeElement !== ta) document.body.classList.remove('md-toolbar-show');
     }, 100);
   });
-  return toolbar;
+
+  return { toolbar, previewPanel };
 }
 
 // Voice-memo recorder. Supports two capture paths:
