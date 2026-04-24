@@ -4,7 +4,7 @@ Gloss turns your paper bullet journal into a searchable, linked database. Take a
 
 Nothing stored in Gloss quotes your prose verbatim. Every entry is a pointer-summary back to the original scan.
 
-Part of a five-app personal suite: [maestro](https://github.com/nathan0colestock-code/maestro) · [comms](https://github.com/nathan0colestock-code/comms) · [scribe](https://github.com/nathan0colestock-code/scribe) · [black](https://github.com/nathan0colestock-code/black)
+Part of a five-app personal suite: [maestro](https://github.com/nathan0colestock-code/maestro) · [comms](https://github.com/nathan0colestock-code/comms) · [scribe](https://github.com/nathan0colestock-code/scribe) · [black hole](https://github.com/nathan0colestock-code/black)
 
 ---
 
@@ -149,7 +149,7 @@ Gloss is the **personal knowledge graph** node of a five-app personal suite. Ind
 |---|---|---|
 | **[comms](https://github.com/nathan0colestock-code/comms)** | iMessage + Gmail + contacts hub | Gloss pushes contact profiles; Comms returns timeline data for briefings |
 | **[scribe](https://github.com/nathan0colestock-code/scribe)** | Collaborative document editor | "Promote to Scribe" creates docs from gloss pages; Scribe links documents back to gloss collections |
-| **[black](https://github.com/nathan0colestock-code/black)** | Personal file search (Drive, Evernote, iCloud) | Black results deep-link to matching gloss pages; briefings query Black in parallel |
+| **[black hole](https://github.com/nathan0colestock-code/black)** | Personal file search (Drive, Evernote, iCloud) | Black Hole results deep-link to matching gloss pages; briefings query Black Hole in parallel |
 | **[maestro](https://github.com/nathan0colestock-code/maestro)** | Overnight code orchestration | Polls `/api/status`; dispatches feature sets; proxies voice captures via `/api/gloss/voice` |
 
 All five apps expose `GET /api/status` → `{ app, version, ok, uptime_seconds, metrics }`, Bearer-authed.
@@ -161,3 +161,11 @@ Integration contracts live in `docs/INTEGRATIONS/` in the primary repo for each 
 ## License
 
 Private.
+
+---
+
+## Have Claude help you set this up
+
+Paste this into [Claude](https://claude.ai) to get guided setup assistance:
+
+> I want to set up Gloss from https://github.com/nathan0colestock-code/gloss. It needs Node.js, Poppler, and a Gemini API key. Help me get it running locally on my Mac and walk me through uploading my first journal scan. I'll share any error messages as we go.
