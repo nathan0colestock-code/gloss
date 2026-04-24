@@ -467,6 +467,28 @@ app.get('/api/logs/recent', requireBearer, (req, res) => {
   }
 });
 
+// GET /api/captures/since?since=<iso>&limit=<n>
+// Returns pages from the Capture section only (is_reference=0, source_kind in
+// scan|voice_memo|markdown, not soft-deleted) captured at-or-after `since`.
+// Used by the Maestro nightly routine to triage fresh captures into tasks.
+app.get('/api/captures/since', requireBearer, (req, res) => {
+  const since = (req.query.since && String(req.query.since)) || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+  const handle = (db.handle && typeof db.handle === 'function') ? db.handle() : null;
+  if (!handle) return res.json({ since, captures: [] });
+  const rows = handle.prepare(`
+    SELECT id, volume, page_number, scan_path, source_kind, summary, raw_ocr_text, captured_at
+      FROM pages
+     WHERE is_reference = 0
+       AND deleted_at IS NULL
+       AND source_kind IN ('scan','voice_memo','markdown')
+       AND captured_at >= ?
+     ORDER BY captured_at ASC
+     LIMIT ?
+  `).all(since, limit);
+  res.json({ since, count: rows.length, captures: rows });
+});
+
 app.get('/login', (req, res) => {
   const err = req.query.error ? '<p style="color:#b00">Wrong password.</p>' : '';
   res.type('html').send(`<!doctype html><meta charset=utf-8><title>Gloss · Sign in</title>

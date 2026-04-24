@@ -175,6 +175,81 @@ describe('PATCH /api/pages/:id', () => {
   });
 });
 
+// ── Captures endpoint (used by Maestro nightly routine) ────────────────────
+
+describe('GET /api/captures/since', () => {
+  const KEY = 'test-captures-key';
+  function getAuthed(url) {
+    return fetch(baseUrl + url, { headers: { Authorization: `Bearer ${KEY}` } });
+  }
+
+  test('rejects without auth', async () => {
+    const { status } = await get('/api/captures/since');
+    assert.equal(status, 401);
+  });
+
+  test('filters out references and out-of-window pages; returns captures newest-after-since', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = KEY;
+    try {
+      const anchor = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+
+      const recentScan = seedPage({
+        captured_at: new Date(Date.now() - 60 * 1000).toISOString(),
+        source_kind: 'scan',
+        summary: 'recent scan capture',
+      });
+      const recentVoice = seedPage({
+        captured_at: new Date(Date.now() - 30 * 1000).toISOString(),
+        source_kind: 'voice_memo',
+        summary: 'recent voice capture',
+      });
+      const olderPage = seedPage({
+        captured_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
+        source_kind: 'scan',
+        summary: 'too old',
+      });
+      const referencePage = seedPage({
+        captured_at: new Date(Date.now() - 10 * 1000).toISOString(),
+        source_kind: 'scan',
+        is_reference: 1,
+        reference_label: 'some reference',
+        summary: 'reference — should be excluded',
+      });
+
+      const res = await getAuthed(`/api/captures/since?since=${encodeURIComponent(anchor)}`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const ids = body.captures.map(c => c.id);
+      assert.ok(ids.includes(recentScan), 'recent scan should be included');
+      assert.ok(ids.includes(recentVoice), 'recent voice_memo should be included');
+      assert.ok(!ids.includes(olderPage), 'older page must be excluded by since filter');
+      assert.ok(!ids.includes(referencePage), 'references must be excluded');
+      for (const c of body.captures) {
+        assert.ok(['scan', 'voice_memo', 'markdown'].includes(c.source_kind), `unexpected source_kind: ${c.source_kind}`);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+
+  test('defaults to last 24h when since is omitted', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = KEY;
+    try {
+      const res = await getAuthed('/api/captures/since');
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.ok(typeof body.since === 'string', 'since should default to an ISO string');
+      assert.ok(Array.isArray(body.captures));
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+});
+
 // ── Collections ────────────────────────────────────────────────────────────
 
 describe('GET /api/collections', () => {
