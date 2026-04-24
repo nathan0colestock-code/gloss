@@ -468,15 +468,19 @@ app.get('/api/logs/recent', requireBearer, (req, res) => {
 });
 
 // GET /api/captures/since?since=<iso>&limit=<n>
-// Returns pages from the Capture section only (is_reference=0, source_kind in
-// scan|voice_memo|markdown, not soft-deleted) captured at-or-after `since`.
+// Returns everything in the user's Capture section since `since`:
+//   - pages (scans, voice memos, committed markdown) that aren't references
+//   - markdown_drafts (the "Notes" list in the Capture view)
 // Used by the Maestro nightly routine to triage fresh captures into tasks.
+// IDs are prefixed with the source kind (`page:<uuid>` or `note:<uuid>`) so
+// downstream callers can annotate the right row.
 app.get('/api/captures/since', requireBearer, (req, res) => {
   const since = (req.query.since && String(req.query.since)) || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
   const handle = (db.handle && typeof db.handle === 'function') ? db.handle() : null;
   if (!handle) return res.json({ since, captures: [] });
-  const rows = handle.prepare(`
+
+  const pageRows = handle.prepare(`
     SELECT id, volume, page_number, scan_path, source_kind, summary, raw_ocr_text, captured_at
       FROM pages
      WHERE is_reference = 0
@@ -486,7 +490,71 @@ app.get('/api/captures/since', requireBearer, (req, res) => {
      ORDER BY captured_at ASC
      LIMIT ?
   `).all(since, limit);
-  res.json({ since, count: rows.length, captures: rows });
+
+  // datetime() normalizes both ISO (YYYY-MM-DDTHH:MM:SS.sssZ) and
+  // SQLite-shaped (YYYY-MM-DD HH:MM:SS) timestamps to the same form, so
+  // markdown_drafts.created_at (written via datetime('now')) compares
+  // correctly against ISO `since` values from callers.
+  const draftRows = handle.prepare(`
+    SELECT id, content, date, created_at
+      FROM markdown_drafts
+     WHERE datetime(created_at) >= datetime(?)
+     ORDER BY datetime(created_at) ASC
+     LIMIT ?
+  `).all(since, limit);
+
+  const captures = [
+    ...pageRows.map(r => ({
+      id: `page:${r.id}`,
+      kind: 'page',
+      source_kind: r.source_kind,
+      volume: r.volume,
+      page_number: r.page_number,
+      scan_path: r.scan_path,
+      summary: r.summary || '',
+      raw_ocr_text: r.raw_ocr_text || '',
+      captured_at: r.captured_at,
+    })),
+    ...draftRows.map(r => {
+      const content = String(r.content || '').trim();
+      const firstLine = content.split('\n').find(l => l.trim()) || '';
+      return {
+        id: `note:${r.id}`,
+        kind: 'note',
+        source_kind: 'note',
+        summary: firstLine.replace(/^#+\s*/, '').slice(0, 140),
+        raw_ocr_text: content,
+        captured_at: r.created_at,
+      };
+    }),
+  ].sort((a, b) => (a.captured_at || '').localeCompare(b.captured_at || '')).slice(0, limit);
+
+  res.json({ since, count: captures.length, captures });
+});
+
+// POST /api/captures/:id/annotate
+// Appends a short marker to the originating capture so the user sees in Gloss
+// that their note was acted on. `id` must be the prefixed id returned by
+// /api/captures/since (page:<uuid> or note:<uuid>). Currently only note:*
+// annotations are written (drafts are editable; pages have richer
+// provenance we shouldn't clobber).
+app.post('/api/captures/:id/annotate', requireBearer, (req, res) => {
+  const raw = String(req.params.id || '');
+  const match = raw.match(/^(page|note):(.+)$/);
+  if (!match) return res.status(400).json({ error: 'id must be prefixed page:<uuid> or note:<uuid>' });
+  const [, kind, id] = match;
+  const note = String((req.body && req.body.note) || '').trim();
+  if (!note) return res.status(400).json({ error: 'note required' });
+
+  if (kind !== 'note') {
+    return res.json({ ok: true, skipped: true, reason: 'annotation only supported for notes' });
+  }
+  const draft = db.getMarkdownDraft(id);
+  if (!draft) return res.status(404).json({ error: 'draft not found' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  const marker = `\n\n— Maestro, ${stamp}: ${note}\n`;
+  const updated = db.updateMarkdownDraft(id, { content: (draft.content || '') + marker, date: draft.date });
+  res.json({ ok: true, id: raw, updated_at: new Date().toISOString(), content_length: updated.content.length });
 });
 
 app.get('/login', (req, res) => {

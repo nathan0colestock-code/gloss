@@ -221,11 +221,11 @@ describe('GET /api/captures/since', () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       const ids = body.captures.map(c => c.id);
-      assert.ok(ids.includes(recentScan), 'recent scan should be included');
-      assert.ok(ids.includes(recentVoice), 'recent voice_memo should be included');
-      assert.ok(!ids.includes(olderPage), 'older page must be excluded by since filter');
-      assert.ok(!ids.includes(referencePage), 'references must be excluded');
-      for (const c of body.captures) {
+      assert.ok(ids.includes(`page:${recentScan}`), 'recent scan should be included with page: prefix');
+      assert.ok(ids.includes(`page:${recentVoice}`), 'recent voice_memo should be included with page: prefix');
+      assert.ok(!ids.includes(`page:${olderPage}`), 'older page must be excluded by since filter');
+      assert.ok(!ids.includes(`page:${referencePage}`), 'references must be excluded');
+      for (const c of body.captures.filter(c => c.kind === 'page')) {
         assert.ok(['scan', 'voice_memo', 'markdown'].includes(c.source_kind), `unexpected source_kind: ${c.source_kind}`);
       }
     } finally {
@@ -243,6 +243,99 @@ describe('GET /api/captures/since', () => {
       const body = await res.json();
       assert.ok(typeof body.since === 'string', 'since should default to an ISO string');
       assert.ok(Array.isArray(body.captures));
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+
+  test('includes markdown_drafts (notes) alongside pages, prefixed with note:', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = KEY;
+    try {
+      const anchor = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+
+      const pageId = seedPage({
+        captured_at: new Date(Date.now() - 30 * 1000).toISOString(),
+        source_kind: 'scan',
+        summary: 'scan page for mixed test',
+      });
+      const draft = db.createMarkdownDraft({
+        id: uid(),
+        content: '# More app improvements\n\nRight now I see scribe versions...',
+        date: '2026-04-24',
+      });
+
+      const res = await getAuthed(`/api/captures/since?since=${encodeURIComponent(anchor)}`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const ids = body.captures.map(c => c.id);
+      assert.ok(ids.includes(`page:${pageId}`), 'page appears with page: prefix');
+      assert.ok(ids.includes(`note:${draft.id}`), 'note appears with note: prefix');
+      const note = body.captures.find(c => c.id === `note:${draft.id}`);
+      assert.equal(note.kind, 'note');
+      assert.equal(note.source_kind, 'note');
+      assert.equal(note.summary, 'More app improvements', 'heading markers stripped from summary');
+      assert.match(note.raw_ocr_text, /scribe versions/);
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+});
+
+describe('POST /api/captures/:id/annotate', () => {
+  const KEY = 'test-annotate-key';
+  function postAuthed(url, body) {
+    return fetch(baseUrl + url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  test('appends marker to an existing markdown draft', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = KEY;
+    try {
+      const draft = db.createMarkdownDraft({ id: uid(), content: 'original idea', date: '2026-04-24' });
+      const res = await postAuthed(`/api/captures/note:${draft.id}/annotate`, { note: 'built as gloss task xyz' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      const refreshed = db.getMarkdownDraft(draft.id);
+      assert.match(refreshed.content, /original idea/);
+      assert.match(refreshed.content, /— Maestro,.+built as gloss task xyz/);
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+
+  test('skips non-note ids rather than failing', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = KEY;
+    try {
+      const pageId = seedPage();
+      const res = await postAuthed(`/api/captures/page:${pageId}/annotate`, { note: 'whatever' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.skipped, true);
+    } finally {
+      if (prev === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = prev;
+    }
+  });
+
+  test('rejects unprefixed or empty ids', async () => {
+    const prev = process.env.API_KEY;
+    process.env.API_KEY = KEY;
+    try {
+      const bad = await postAuthed('/api/captures/bogus-id/annotate', { note: 'x' });
+      assert.equal(bad.status, 400);
+      const draft = db.createMarkdownDraft({ id: uid(), content: 'x', date: '2026-04-24' });
+      const empty = await postAuthed(`/api/captures/note:${draft.id}/annotate`, {});
+      assert.equal(empty.status, 400);
     } finally {
       if (prev === undefined) delete process.env.API_KEY;
       else process.env.API_KEY = prev;
