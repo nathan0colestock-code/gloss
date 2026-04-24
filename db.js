@@ -434,12 +434,28 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_ci ON headings(label COLLATE NOCASE);
 `);
+// Narrow migration wrapper — only swallow the specific SQLite errors that
+// mean "this migration already ran". Anything else (disk full, locked, etc.)
+// should still blow up so we notice. Mirrors the Maestro fix pattern.
+function safeMigrate(sql, expected) {
+  try {
+    db.exec(sql);
+    return true;
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    for (const needle of expected) {
+      if (msg.toLowerCase().includes(needle)) return false;
+    }
+    throw e; // unexpected — re-raise
+  }
+}
 // Migration: add scope to headings so collections and artifacts have separate heading pools.
-// try-catch is idempotent — SQLite throws "duplicate column name" if the column already exists.
-try { db.exec(`ALTER TABLE headings ADD COLUMN scope TEXT NOT NULL DEFAULT 'collection'`); } catch {}
+safeMigrate(
+  `ALTER TABLE headings ADD COLUMN scope TEXT NOT NULL DEFAULT 'collection'`,
+  ['duplicate column name']
+);
 // Drop the old label-only unique index; the new (label, scope) composite index takes its place.
-// try-catch: "no such index" on repeat runs is fine.
-try { db.exec(`DROP INDEX ux_headings_label_ci`); } catch {}
+safeMigrate(`DROP INDEX ux_headings_label_ci`, ['no such index']);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_headings_label_scope_ci ON headings(label COLLATE NOCASE, scope)`);
 
 // Exclusions / inclusions for AI-curated user_indexes. An excluded entry is
@@ -2975,11 +2991,17 @@ function updateCommitment(id, { text, value_slug, status, start_date, target_dat
 // Unified list: projects + commitments, merged by start_date/target_date.
 // Each row: { kind, id, title, status, start_date, target_date, due_date,
 //             description, value_slug, parent_id, created_at }
+//
+// Projects were folded into `collections` (kind='project') by the migration
+// above. We read from collections as the source of truth; the legacy
+// `projects` table is left untouched so external introspection still works,
+// but new rows should only land in `collections`.
 function listCommitmentsTimeline() {
   const projects = db.prepare(`
     SELECT 'project' as kind, id, title, status, start_date, target_date, due_date,
-           description, NULL as value_slug, NULL as parent_id, created_at
-    FROM projects
+           description, NULL as value_slug, parent_id, created_at
+    FROM collections
+    WHERE kind = 'project'
   `).all();
   const commits = db.prepare(`
     SELECT 'commitment' as kind, id, text as title, status, start_date, target_date, due_date,

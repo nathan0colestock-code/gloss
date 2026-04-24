@@ -699,6 +699,18 @@ function applyRoleAreaTags(pages, roleIds, areaIds) {
   }
 }
 
+// Upsert a household from a free-text mention and link a page to it. Centralizes
+// the (find-by-mention → fall back to upsert-by-name → link) dance that used
+// to be duplicated across every ingest path. Returns the household row (or
+// null if the mention was empty/unresolvable).
+function upsertHousehold(mention, { pageId = null, confidence = 0.9, roleSummary = null } = {}) {
+  const label = String(mention || '').trim();
+  if (!label) return null;
+  const h = db.findHouseholdByMention(label) || db.upsertHouseholdByName(label);
+  if (h && pageId) db.linkPageToHousehold(pageId, h.id, confidence, roleSummary);
+  return h;
+}
+
 // Resolve a person reference from the AI. If the label is a single word (first-name
 // only), use context + recency to pick the right existing person. If ambiguous,
 // stage a backlog question so the user can clarify and still return the best-guess
@@ -802,8 +814,7 @@ app.post('/api/ingest/voice', async (req, res) => {
           });
           db.linkPageToScripture(pageId, ref.id, 1.0, roleSummary);
         } else if (entity.kind === 'household' && entity.label) {
-          const h = db.findHouseholdByMention(entity.label) || db.upsertHouseholdByName(entity.label);
-          if (h) db.linkPageToHousehold(pageId, h.id, entity.confidence ?? 0.9, roleSummary);
+          upsertHousehold(entity.label, { pageId, confidence: entity.confidence ?? 0.9, roleSummary });
         } else if (entity.kind === 'person' && entity.label) {
           const p = db.upsertPerson({ label: entity.label });
           db.linkPageToPerson(pageId, p.id, 1.0, roleSummary);
@@ -981,8 +992,7 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
           });
           db.linkPageToScripture(pageId, ref.id, 1.0, roleSummary);
         } else if (entity.kind === 'household' && entity.label) {
-          const h = db.findHouseholdByMention(entity.label) || db.upsertHouseholdByName(entity.label);
-          if (h) db.linkPageToHousehold(pageId, h.id, entity.confidence ?? 0.9, roleSummary);
+          upsertHousehold(entity.label, { pageId, confidence: entity.confidence ?? 0.9, roleSummary });
         } else if (entity.kind === 'person' && entity.label) {
           const p = db.upsertPerson({ label: entity.label });
           db.linkPageToPerson(pageId, p.id, 1.0, roleSummary);
@@ -1068,8 +1078,7 @@ function _saveVoiceAudioPage(parsed, transcript, isoDate, file) {
         });
         db.linkPageToScripture(pageId, ref.id, 1.0, roleSummary);
       } else if (entity.kind === 'household' && entity.label) {
-        const h = db.findHouseholdByMention(entity.label) || db.upsertHouseholdByName(entity.label);
-        if (h) db.linkPageToHousehold(pageId, h.id, entity.confidence ?? 0.9, roleSummary);
+        upsertHousehold(entity.label, { pageId, confidence: entity.confidence ?? 0.9, roleSummary });
       } else if (entity.kind === 'person' && entity.label) {
         const p = db.upsertPerson({ label: entity.label });
         db.linkPageToPerson(pageId, p.id, 1.0, roleSummary);
@@ -1766,8 +1775,7 @@ function _savePageFromParseInner(parsed, scanRelPath, idx, total, { volumeOverri
       });
       db.linkPageToScripture(pageId, ref.id, 1.0, roleSummary);
     } else if (entity.kind === 'household' && entity.label) {
-      const h = db.findHouseholdByMention(entity.label) || db.upsertHouseholdByName(entity.label);
-      if (h) db.linkPageToHousehold(pageId, h.id, entity.confidence ?? 0.9, roleSummary);
+      upsertHousehold(entity.label, { pageId, confidence: entity.confidence ?? 0.9, roleSummary });
     } else if (entity.kind === 'person' && entity.label) {
       const resolved = resolvePersonReference(entity.label, pageId, parsed.summary);
       if (resolved.person) db.linkPageToPerson(pageId, resolved.person.id, 1.0, roleSummary);
@@ -5300,4 +5308,5 @@ module.exports = app;
 module.exports.__test = {
   extractPersonNameFromSubject,
   savePageFromParse,
+  upsertHousehold,
 };
