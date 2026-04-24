@@ -25,9 +25,25 @@ const db = require('./db');
 const { parsePageImage, chat, chatWithActions, reexaminePage, parseVoiceMemo, parseMarkdownPage, probePageHeader,
         generateIndexStructure, classifyPageForIndexes, suggestMetaCategories,
         classifyRowForCrossKind, generateTopicalIndexEntries, transcribeAudio,
-        parseVoiceMemoStream, parseMarkdownPageStream } = require('./ai');
+        parseVoiceMemoStream, parseMarkdownPageStream, embed } = require('./ai');
+
+// Fire-and-forget embedding. On every ingest/update we kick this off and
+// let the promise resolve whenever it finishes — nothing blocks. Embedding
+// failures are already swallowed inside ai.embed() and logged there.
+function queueEmbed(kind, entityId, text) {
+  if (!text || !entityId) return;
+  Promise.resolve().then(async () => {
+    try {
+      const v = await embed(text);
+      db.vecSet(kind, entityId, v);
+    } catch (e) {
+      // ai.embed already logs; silently swallow here so nothing throws.
+    }
+  });
+}
 const google = require('./google');
 const comms = require('./comms');
+const log = require('./log');
 
 const DEBUG = process.env.DEBUG === '1';
 const dbg = (...args) => { if (DEBUG) console.log(...args); };
@@ -83,7 +99,7 @@ async function pollGoogleDriveForNewFiles() {
       db.saveDrivePageToken(pageToken);
       dbg('[drive-poll] initialized page token');
     } catch (e) {
-      console.warn('[drive-poll] failed to get start token:', e.message);
+      log('warn', 'drive_poll_start_token_failed', { error: e.message });
     }
     return;
   }
@@ -94,7 +110,7 @@ async function pollGoogleDriveForNewFiles() {
     if (result && result.enabled === false) return;
     ({ files, newPageToken } = result);
   } catch (e) {
-    console.warn('[drive-poll] poll failed:', e.message);
+    log('warn', 'drive_poll_failed', { error: e.message });
     return;
   }
   db.saveDrivePageToken(newPageToken);
@@ -151,7 +167,7 @@ async function pollGoogleDriveForNewFiles() {
         captured++;
       }
     } catch (e) {
-      console.warn(`[drive-poll] failed to process file ${file.id} (${file.name}):`, e.message);
+      log('warn', 'drive_poll_file_failed', { file_id: file.id, name: file.name, error: e.message });
     }
   }
 
@@ -172,6 +188,7 @@ if (IS_PROD_EARLY) app.set('trust proxy', 1);
 const BIND_HOST = IS_PROD_EARLY ? '0.0.0.0' : (process.env.BIND_HOST || '127.0.0.1');
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(log.httpMiddleware());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
@@ -238,14 +255,14 @@ let SESSION_SECRET = process.env.SESSION_SECRET;
 const AUTH_ENABLED = IS_PROD || !!AUTH_PASSWORD;
 if (IS_PROD) {
   if (!AUTH_PASSWORD || !SESSION_SECRET) {
-    console.error('[auth] AUTH_PASSWORD and SESSION_SECRET must be set in production.');
+    log('error', 'auth_config_missing', { message: 'AUTH_PASSWORD and SESSION_SECRET must be set in production' });
     process.exit(1);
   }
 } else {
   if (AUTH_ENABLED) {
-    if (!SESSION_SECRET) { SESSION_SECRET = 'dev'; console.warn('\x1b[33m[auth] SESSION_SECRET unset — using dev fallback\x1b[0m'); }
+    if (!SESSION_SECRET) { SESSION_SECRET = 'dev'; log('warn', 'auth_session_secret_fallback', { note: 'using dev fallback' }); }
   } else {
-    console.warn('\x1b[33m[auth] AUTH_PASSWORD unset — auth disabled for local dev\x1b[0m');
+    log('warn', 'auth_disabled_local_dev', { reason: 'AUTH_PASSWORD unset' });
     SESSION_SECRET = SESSION_SECRET || 'dev';
   }
 }
@@ -433,6 +450,20 @@ app.get('/api/telemetry/nightly', requireBearer, (req, res) => {
     metrics,
     health,
   });
+});
+
+// ── /api/logs/recent ───────────────────────────────────────────────────────
+// Bearer-gated view of the in-memory log ring buffer. Maestro's log-collector
+// pulls this hourly. Filters: ?since=<ISO>&level=<min>&limit=<N>.
+app.get('/api/logs/recent', requireBearer, (req, res) => {
+  const { since, level, limit } = req.query || {};
+  try {
+    const entries = log.recent({ since, level, limit });
+    res.json({ app: 'gloss', count: entries.length, entries });
+  } catch (e) {
+    log('error', 'logs_recent_failed', { error: String(e.message || e) });
+    res.status(500).json({ error: 'logs fetch failed' });
+  }
 });
 
 app.get('/login', (req, res) => {
@@ -657,12 +688,12 @@ function applyRoleAreaTags(pages, roleIds, areaIds) {
     if (!pageId || pg.error) continue;
     for (const eid of entityIds) {
       try { db.linkBetween({ from_type: 'page', from_id: pageId, to_type: 'entity', to_id: eid }); }
-      catch (e) { console.warn('role/area tag skip (page):', e.message); }
+      catch (e) { log('warn', 'role_area_tag_skip_page', { error: e.message }); }
     }
     for (const c of (pg.collections || [])) {
       for (const eid of entityIds) {
         try { db.linkBetween({ from_type: 'collection', from_id: c.id, to_type: 'entity', to_id: eid }); }
-        catch (e) { console.warn('role/area tag skip (collection):', e.message); }
+        catch (e) { log('warn', 'role_area_tag_skip_collection', { error: e.message }); }
       }
     }
   }
@@ -750,6 +781,7 @@ app.post('/api/ingest/voice', async (req, res) => {
       source_kind: 'voice_memo',
       captured_at: `${isoDate}T12:00:00`,
     });
+    queueEmbed('pages', pageId, [parsed.summary || '', transcript.trim()].filter(Boolean).join('\n\n'));
 
     const itemRows = (parsed.items || []).map(item => ({
       id: crypto.randomUUID(),
@@ -786,7 +818,7 @@ app.post('/api/ingest/voice', async (req, res) => {
             role_summary: roleSummary,
           });
         }
-      } catch (e) { console.warn('voice entity skip:', e.message); }
+      } catch (e) { log('warn', 'voice_entity_skip', { error: e.message }); }
     }
 
     const backlogRows = (parsed.backlog_items || []).map(b => ({
@@ -819,7 +851,7 @@ app.post('/api/ingest/voice', async (req, res) => {
       review_url: `/daily/${isoDate}`,
     });
   } catch (err) {
-    console.error('voice ingest failed:', err);
+    log('error', 'voice_ingest_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: 'Voice ingest failed', detail: err.message });
   }
 });
@@ -887,7 +919,7 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
           else if (frame.type === 'final') finalParsed = frame.parsed;
         }
       } catch (streamErr) {
-        console.warn('voice-audio stream parse failed, falling back:', streamErr.message);
+        log('warn', 'voice_audio_stream_fallback', { error: streamErr.message });
       }
       if (!finalParsed) {
         finalParsed = await parseVoiceMemo(
@@ -900,7 +932,7 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
       const saved = _saveVoiceAudioPage(finalParsed, transcript.trim(), isoDate, req.file);
       emit({ type: 'done', ...saved });
     } catch (err) {
-      console.error('voice-audio stream ingest failed:', err);
+      log('error', 'voice_audio_stream_ingest_failed', { error: String(err && err.message || err) });
       emit({ type: 'error', error: err.message, fatal: true });
     }
     res.end();
@@ -926,6 +958,7 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
       source_kind: 'voice_memo',
       captured_at: `${isoDate}T12:00:00`,
     });
+    queueEmbed('pages', pageId, [parsed.summary || '', transcript.trim()].filter(Boolean).join('\n\n'));
 
     const itemRows = (parsed.items || []).map(item => ({
       id: crypto.randomUUID(),
@@ -964,7 +997,7 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
             role_summary: roleSummary,
           });
         }
-      } catch (e) { console.warn('voice-audio entity skip:', e.message); }
+      } catch (e) { log('warn', 'voice_audio_entity_skip', { error: e.message }); }
     }
 
     const backlogRows = (parsed.backlog_items || []).map(b => ({
@@ -996,7 +1029,7 @@ app.post('/api/ingest/voice-audio', voiceAudioUpload.single('audio'), async (req
       audio_path: `/voice-memos/${path.basename(req.file.path)}`,
     });
   } catch (err) {
-    console.error('voice-audio ingest failed:', err);
+    log('error', 'voice_audio_ingest_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: 'Voice-audio ingest failed', detail: err.message });
   }
 });
@@ -1016,6 +1049,7 @@ function _saveVoiceAudioPage(parsed, transcript, isoDate, file) {
     source_kind: 'voice_memo',
     captured_at: `${isoDate}T12:00:00`,
   });
+  queueEmbed('pages', pageId, [parsed.summary || '', transcript || ''].filter(Boolean).join('\n\n'));
   const itemRows = (parsed.items || []).map(item => ({
     id: crypto.randomUUID(),
     page_id: pageId,
@@ -1050,7 +1084,7 @@ function _saveVoiceAudioPage(parsed, transcript, isoDate, file) {
           role_summary: roleSummary,
         });
       }
-    } catch (e) { console.warn('voice-audio entity skip:', e.message); }
+    } catch (e) { log('warn', 'voice_audio_entity_skip', { error: e.message }); }
   }
   const backlogRows = (parsed.backlog_items || []).map(b => ({
     id: crypto.randomUUID(),
@@ -1160,7 +1194,7 @@ app.post('/api/markdown-drafts/:id/commit', async (req, res) => {
       daily_log: { id: dl.id, date: draft.date },
     });
   } catch (err) {
-    console.error('markdown draft commit failed:', err);
+    log('error', 'markdown_draft_commit_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: 'Commit failed', detail: err.message });
   }
 });
@@ -1207,7 +1241,7 @@ app.post('/api/ingest/markdown', async (req, res) => {
       const saved = _saveMarkdownPage(finalParsed, trimmed, isoDate);
       emit({ type: 'done', ...saved });
     } catch (err) {
-      console.warn('markdown stream ingest failed, falling back:', err.message);
+      log('warn', 'markdown_stream_fallback', { error: err.message });
       // Non-streaming fallback within the same response — the client's ndjson
       // iterator will see {type:'error'} then the same shape as 'done'.
       emit({ type: 'error', error: err.message });
@@ -1242,7 +1276,7 @@ app.post('/api/ingest/markdown', async (req, res) => {
     const saved = _saveMarkdownPage(parsed, trimmed, isoDate);
     res.json({ ok: true, ...saved });
   } catch (err) {
-    console.error('markdown ingest failed:', err);
+    log('error', 'markdown_ingest_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: 'Markdown ingest failed', detail: err.message });
   }
 });
@@ -1690,7 +1724,7 @@ function _savePageFromParseInner(parsed, scanRelPath, idx, total, { volumeOverri
   if (effectiveVolume && parsed.page_number) {
     const existing = db.getPageByLocation(effectiveVolume, parsed.page_number);
     if (existing) {
-      console.warn(`[ingest] duplicate: page already exists at ${effectiveVolume} p.${parsed.page_number} (id=${existing.id}). Run POST /api/admin/dedup-pages to clean up.`);
+      log('warn', 'ingest_duplicate_page', { volume: effectiveVolume, page_number: parsed.page_number, existing_id: existing.id });
     }
   }
 
@@ -1705,6 +1739,7 @@ function _savePageFromParseInner(parsed, scanRelPath, idx, total, { volumeOverri
     continued_from: parsed.continued_from ?? null,
     continued_to: parsed.continued_to ?? null,
   });
+  queueEmbed('pages', pageId, [parsed.summary || '', parsed.raw_ocr_text || ''].filter(Boolean).join('\n\n'));
 
   const itemRows = (parsed.items || []).map(item => ({
     id: crypto.randomUUID(),
@@ -1893,11 +1928,11 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
           const is429 = /429|RESOURCE_EXHAUSTED|rate/i.test(String(e.message || e));
           if (attempt === 2 || !is429) break;
           const waitMs = (attempt + 1) * 3000 + Math.floor(Math.random() * 500);
-          console.warn(`  [PDF] probe ${job.scanNum} hit rate limit (attempt ${attempt + 1}) — retrying in ${waitMs}ms`);
+          log('warn', 'pdf_probe_rate_limit', { scan: job.scanNum, attempt: attempt + 1, wait_ms: waitMs });
           await new Promise(r => setTimeout(r, waitMs));
         }
       }
-      if (probeErr && !probed) console.warn(`  [PDF] probe ${job.scanNum} failed:`, probeErr.message);
+      if (probeErr && !probed) log('warn', 'pdf_probe_failed', { scan: job.scanNum, error: probeErr.message });
       probeResultsByScan[job.scanNum] = probed || { pages: [] };
       // Probe done → eligible for full parse.
       parseQueue.push(job);
@@ -1933,7 +1968,7 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
             const is429 = /429|RESOURCE_EXHAUSTED|rate/i.test(msg);
             if (attempt === 2 || !is429) throw e;
             const waitMs = (attempt + 1) * 4000 + Math.floor(Math.random() * 1000);
-            console.warn(`  [PDF] scan ${job.scanNum} hit rate limit (attempt ${attempt + 1}) — retrying in ${waitMs}ms`);
+            log('warn', 'pdf_scan_rate_limit', { scan: job.scanNum, attempt: attempt + 1, wait_ms: waitMs });
             await new Promise(r => setTimeout(r, waitMs));
           }
         }
@@ -1945,7 +1980,7 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
         if (typeof onPageComplete === 'function') {
           for (const pr of result.pages) {
             try { onPageComplete({ ...pr, scan_num: job.scanNum, total_scans: pageCount }); }
-            catch (e) { console.warn('  [PDF] onPageComplete threw:', e.message); }
+            catch (e) { log('warn', 'pdf_on_page_complete_threw', { error: e.message }); }
           }
         }
         for (const pr of result.pages) {
@@ -1958,7 +1993,7 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
         }
         if (rollingContext.length > 20) rollingContext.length = 20;
       } catch (err) {
-        console.error(`  [PDF] scan ${job.scanNum} failed:`, err.message);
+        log('error', 'pdf_scan_failed', { scan: job.scanNum, error: err.message });
         resultsByScan[job.scanNum] = [{ error: err.message, scan_url: job.scanRelPath, page_index: job.scanNum }];
         try {
           db.recordIngestFailure({
@@ -1968,7 +2003,7 @@ async function ingestPdf(pdfPath, { userKindHint, volumeOverride, onPageComplete
             error: err.message || String(err),
             volume: volumeOverride || null,
           });
-        } catch (e) { console.error('  [PDF] failed to record failure:', e.message); }
+        } catch (e) { log('error', 'pdf_record_failure_failed', { error: e.message }); }
       }
     }
   }
@@ -2441,11 +2476,25 @@ app.get('/api/remember', (req, res) => {
 
 // ── GET /api/search ─────────────────────────────────────────────────────────
 // Global Cmd-K search across pages, collections, people, scripture, topics, books.
-// Each bucket limited to 5. Fires on every keystroke — keep it cheap.
-app.get('/api/search', (req, res) => {
+// Pages bucket uses hybrid search (0.6 semantic + 0.4 FTS) when vec is loaded
+// and we successfully embed the query; falls back to FTS otherwise. Other
+// buckets still use LIKE via db.searchAll. Keep it cheap — fires on every keystroke.
+app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ pages: [], collections: [], people: [], scripture: [], topics: [], books: [] });
-  res.json(db.searchAll(q, 5));
+  const base = db.searchAll(q, 5);
+  if (db.vecReady() && q.length >= 3) {
+    try {
+      const qVec = await embed(q);
+      const hybrid = db.hybridSearchPages(q, { queryVector: qVec, limit: 5 });
+      if (hybrid.length) {
+        base.pages = hybrid.map(p => ({ ...p, kind: 'page', title: p.summary || `p.${p.page_number ?? '?'}` }));
+      }
+    } catch (e) {
+      log('debug', 'hybrid_search_fallback', { error: String(e.message || e) });
+    }
+  }
+  res.json(base);
 });
 
 // ── POST /api/research-briefing ─────────────────────────────────────────────
@@ -2480,10 +2529,23 @@ app.post('/api/research-briefing', async (req, res) => {
     ? (prompt.split(/[.!?]/)[0] || prompt).slice(0, 120)
     : prompt;
 
-  // 1. Local Gloss search — pages + entities
+  // 1. Local Gloss search — pages + entities. Use hybrid search for pages
+  //    when vec is available; the richer prompt often has zero FTS overlap
+  //    but strong semantic overlap with captured notes.
   let local;
   try { local = db.searchAll(query, 20); }
   catch (e) { local = { pages: [], collections: [], people: [], scripture: [], topics: [], books: [] }; }
+  if (db.vecReady()) {
+    try {
+      const qVec = await embed(prompt);
+      const hybrid = db.hybridSearchPages(query, { queryVector: qVec, limit: 20 });
+      if (hybrid.length) {
+        local.pages = hybrid.map(p => ({ ...p, kind: 'page', title: p.summary || `p.${p.page_number ?? '?'}` }));
+      }
+    } catch (e) {
+      log('debug', 'research_briefing_hybrid_fallback', { error: String(e.message || e) });
+    }
+  }
 
   // 2. Remote Comms + Black in parallel (best-effort — briefing still renders
   //    if a sibling is down; missing sections just read as "no matches").
@@ -2627,7 +2689,7 @@ app.patch('/api/backlog/:id', (req, res) => {
         return;
       }
     } catch (e) {
-      console.warn('learnFromAnsweredQuestion failed:', e.message);
+      log('warn', 'learn_from_answered_failed', { error: e.message });
     }
 
     // Term-based learning + auto-close: if the answered subject had a quoted term
@@ -2653,7 +2715,7 @@ app.patch('/api/backlog/:id', (req, res) => {
         if (closed) dbg(`  [backlog] auto-closed ${closed} duplicate(s) for term '${answeredTerm}'`);
       }
     } catch (e) {
-      console.warn('term learning/auto-close failed:', e.message);
+      log('warn', 'term_learning_failed', { error: e.message });
     }
 
     // Audit question: "Date needed: v.D p.N" — user answered with a date → file it.
@@ -2667,7 +2729,7 @@ app.patch('/api/backlog/:id', (req, res) => {
           try { db.linkPageToDailyLog(row.context_page_id, dl.id, 1.0); } catch (_) {}
           dbg(`  [audit] filed ${row.context_page_id} to daily log ${isoDate}`);
         }
-      } catch (e) { console.warn('audit date filing failed:', e.message); }
+      } catch (e) { log('warn', 'audit_date_filing_failed', { error: e.message }); }
       res.json({ ok: true });
       return;
     }
@@ -2682,7 +2744,7 @@ app.patch('/api/backlog/:id', (req, res) => {
           try { db.linkPageToCollection(row.context_page_id, coll.id, 1.0); } catch (_) {}
           dbg(`  [audit] filed ${row.context_page_id} to collection "${title}"`);
         }
-      } catch (e) { console.warn('audit collection filing failed:', e.message); }
+      } catch (e) { log('warn', 'audit_collection_filing_failed', { error: e.message }); }
       res.json({ ok: true });
       return;
     }
@@ -3587,7 +3649,7 @@ app.post('/api/reference-scans', upload.array('scans', 50), async (req, res) => 
         db.markPageAsReference(pageId, label);
         if (collectionId) {
           try { db.linkBetween({ from_type: 'page', from_id: pageId, to_type: 'collection', to_id: collectionId }); }
-          catch (e) { console.warn('ref collection link skip:', e.message); }
+          catch (e) { log('warn', 'ref_collection_link_skip', { error: e.message }); }
         }
       }
       applyRoleAreaTags(pages, roleIds, areaIds);
@@ -3739,16 +3801,16 @@ async function reexaminePageInBackground(pageId, newlyConfirmed) {
       try {
         const person = (detail?.people || []).find(p => p.label && p.label.toLowerCase() === String(rn.from).toLowerCase());
         if (person) { db.updatePerson(person.id, { label: rn.to }); appliedRevisions++; }
-      } catch (e) { console.warn('rename_people skip:', e.message); }
+      } catch (e) { log('warn', 'rename_people_skip', { error: e.message }); }
     }
     for (const rt of (revisions.replace_topics || [])) {
       if (!rt.from || !rt.to || rt.from === rt.to) continue;
       try { db.replaceTopicOnPage(pageId, rt.from, rt.to); appliedRevisions++; }
-      catch (e) { console.warn('replace_topics skip:', e.message); }
+      catch (e) { log('warn', 'replace_topics_skip', { error: e.message }); }
     }
     if (revisions.rewrite_summary && revisions.rewrite_summary.trim() && revisions.rewrite_summary !== page.summary) {
       try { db.updatePageSummary(pageId, revisions.rewrite_summary.trim()); appliedRevisions++; }
-      catch (e) { console.warn('rewrite_summary skip:', e.message); }
+      catch (e) { log('warn', 'rewrite_summary_skip', { error: e.message }); }
     }
 
     let addedEntities = 0;
@@ -3778,12 +3840,12 @@ async function reexaminePageInBackground(pageId, newlyConfirmed) {
           });
           addedEntities++;
         }
-      } catch (e) { console.warn('reexamine link skip:', e.message); }
+      } catch (e) { log('warn', 'reexamine_link_skip', { error: e.message }); }
     }
 
     return { added_entities: addedEntities, added_backlog: 0, applied_revisions: appliedRevisions };
   } catch (err) {
-    console.warn('reexamine failed:', err.message);
+    log('warn', 'reexamine_failed', { error: err.message });
     return { added_entities: 0, added_backlog: 0, applied_revisions: 0 };
   }
 }
@@ -3841,7 +3903,7 @@ app.post('/api/ingest-failures/:id/retry', async (req, res) => {
       lastErr = err;
       if (attempt === 3 || !isTransient(err.message)) break;
       const waitMs = 2000 * (attempt + 1) + Math.floor(Math.random() * 1000);
-      console.warn(`  [retry] ${f.scan_path} attempt ${attempt + 1} transient (${err.message.slice(0, 80)}) — waiting ${waitMs}ms`);
+      log('warn', 'ingest_retry_transient', { scan_path: f.scan_path, attempt: attempt + 1, error: err.message.slice(0, 80), wait_ms: waitMs });
       await new Promise(r => setTimeout(r, waitMs));
     }
   }
@@ -4058,6 +4120,27 @@ app.get('/api/pages/:id/detail', (req, res) => {
   res.json(detail);
 });
 
+// ── GET /api/pages/:id/related ─────────────────────────────────────────────
+// Top semantically similar pages (excludes self). Uses the stored embedding
+// from ingest. If vec isn't loaded or the page has no embedding, returns an
+// empty list so the UI can degrade cleanly.
+app.get('/api/pages/:id/related', async (req, res) => {
+  const pageId = req.params.id;
+  const page = db.getPage(pageId);
+  if (!page) return res.status(404).json({ error: 'Not found' });
+  if (!db.vecReady()) return res.json({ items: [], degraded: true, reason: 'vec_not_loaded' });
+  try {
+    const source = [page.summary || '', page.raw_ocr_text || ''].filter(Boolean).join('\n\n').trim();
+    if (!source) return res.json({ items: [] });
+    const vector = await embed(source);
+    const items = db.relatedPages(pageId, vector, { limit: 3 });
+    res.json({ items });
+  } catch (e) {
+    log('warn', 'related_pages_failed', { id: pageId, error: String(e.message || e) });
+    res.status(500).json({ error: 'related failed' });
+  }
+});
+
 // ── Promote a gloss page to a new Scribe document ───────────────────────────
 // Loads the page, POSTs to scribe's /api/documents with a {source} field that
 // identifies this gloss page, and records the returned doc_id on the page's
@@ -4120,7 +4203,7 @@ app.post('/api/promote-to-scribe', async (req, res) => {
   if (!doc || !doc.id) return res.status(502).json({ error: 'scribe response missing document.id' });
 
   const version = { doc_id: doc.id, title: doc.title || title, created_at: doc.created_at || new Date().toISOString() };
-  try { db.appendPageScribeVersion(page_id, version); } catch (e) { console.warn('scribe version log failed:', e.message); }
+  try { db.appendPageScribeVersion(page_id, version); } catch (e) { log('warn', 'scribe_version_log_failed', { error: e.message }); }
 
   res.json({
     ok: true,
@@ -4446,7 +4529,7 @@ app.get('/api/index/tree', (req, res) => {
     const tree = db.listIndexTree({ includeArchived });
     res.json(tree);
   } catch (err) {
-    console.error('index tree failed:', err);
+    log('error', 'index_tree_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: err.message });
   } finally {
     console.timeEnd('index-load');
@@ -4621,7 +4704,7 @@ app.post('/api/user-indexes/ai', async (req, res) => {
     setImmediate(() => classifyAllPagesForIndex(root.id));
     res.json({ ok: true, root });
   } catch (err) {
-    console.error('ai index creation failed:', err);
+    log('error', 'ai_index_creation_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: 'AI index creation failed', detail: err.message });
   }
 });
@@ -4642,7 +4725,7 @@ app.post('/api/user-indexes/ai/suggest', async (req, res) => {
     const { proposals } = await suggestMetaCategories(sample);
     res.json({ proposals });
   } catch (err) {
-    console.error('meta-category suggestion failed:', err);
+    log('error', 'meta_category_suggestion_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: err.message });
   }
 });
@@ -4704,7 +4787,7 @@ async function bootstrapEntitiesSweep(ids) {
         label: 'Surface any people or topics that may have been missed earlier.',
       });
     } catch (e) {
-      console.warn('bootstrap entity skip', ids[i], e.message);
+      log('warn', 'bootstrap_entity_skip', { id: ids[i], error: e.message });
     }
     // Gentle pacing — don't fire 300 Gemini calls at once.
     await new Promise(r => setTimeout(r, 400));
@@ -4771,7 +4854,7 @@ async function classifyPageForIndexesInBackground(pageId) {
       try { db.touchUserIndexClassifiedAt(idxId); } catch {}
     }
   } catch (err) {
-    console.warn('classifyPageForIndexesInBackground failed:', err.message);
+    log('warn', 'classify_page_for_indexes_failed', { error: err.message });
   }
 }
 
@@ -4785,7 +4868,7 @@ async function classifyAllPagesForIndex(rootUserIndexId) {
     }
     try { db.touchUserIndexClassifiedAt(rootUserIndexId); } catch {}
   } catch (err) {
-    console.warn('classifyAllPagesForIndex failed:', err.message);
+    log('warn', 'classify_all_pages_for_index_failed', { error: err.message });
   }
 }
 
@@ -4827,7 +4910,7 @@ function scheduleCrossKindClassify(kind, id, { force = false } = {}) {
   const t = setTimeout(() => {
     _crossKindDebounce.delete(key);
     classifyRowForCrossKindInBackground(kind, id, { force }).catch(err =>
-      console.warn('[cross-kind] bg classify failed:', key, err.message)
+      log('warn', 'cross_kind_classify_failed', { key, error: err.message })
     );
   }, 50);
   _crossKindDebounce.set(key, t);
@@ -4889,7 +4972,7 @@ async function classifyRowForCrossKindInBackground(fromKind, fromId, { force = f
             confidence, role_summary: roleSummary,
           });
           linked++;
-        } catch (e) { console.warn('[cross-kind] link failed:', e.message); }
+        } catch (e) { log('warn', 'cross_kind_link_failed', { error: e.message }); }
       } else if (confidence >= 0.50) {
         try {
           db.insertBacklogItems([{
@@ -4906,7 +4989,7 @@ async function classifyRowForCrossKindInBackground(fromKind, fromId, { force = f
     db.markLinksClassified(fromKind, fromId);
     return { linked, proposals };
   } catch (err) {
-    console.warn('classifyRowForCrossKindInBackground failed:', err.message);
+    log('warn', 'classify_row_cross_kind_failed', { error: err.message });
     return { linked: 0, proposals: 0, error: err.message };
   }
 }
@@ -5048,7 +5131,7 @@ app.post('/api/user-indexes/:id/rebuild', async (req, res) => {
       aiEntries = resp.entries || [];
       aiRejected = resp.rejected || [];
     } catch (err) {
-      console.warn('generateTopicalIndexEntries failed:', err.message);
+      log('warn', 'generate_topical_index_entries_failed', { error: err.message });
       aiEntries = forAi.map(c => ({ kind: c.kind, id: c.id }));
     }
     // Record AI rejections as auto-exclusions.
@@ -5071,7 +5154,7 @@ app.post('/api/user-indexes/:id/rebuild', async (req, res) => {
       forced_included: forcedSet.size,
     });
   } catch (err) {
-    console.error('rebuild failed:', err);
+    log('error', 'rebuild_failed', { error: String(err && err.message || err) });
     res.status(500).json({ error: err.message });
   }
 });
@@ -5164,32 +5247,32 @@ app.post('/api/comms/sync', async (req, res) => {
 
 if (require.main === module) {
   app.listen(PORT, BIND_HOST, () => {
-    console.log(`Gloss running at http://${BIND_HOST}:${PORT}`);
-    try { db.syncGlossaryFromBacklog(); } catch (e) { console.warn('[glossary] seed failed:', e.message); }
+    log('info', 'startup', { bind_host: BIND_HOST, port: PORT });
+    try { db.syncGlossaryFromBacklog(); } catch (e) { log('warn', 'glossary_seed_failed', { error: e.message }); }
 
     if (google.isEnabled()) {
       const DRIVE_POLL_MS = parseInt(process.env.GOOGLE_DRIVE_POLL_INTERVAL_MS || String(10 * 60 * 1000), 10);
-      setTimeout(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), 5000);
-      setInterval(() => pollGoogleDriveForNewFiles().catch(e => console.warn('[drive-poll]', e.message)), DRIVE_POLL_MS);
+      setTimeout(() => pollGoogleDriveForNewFiles().catch(e => log('warn', 'drive_poll_error', { error: e.message })), 5000);
+      setInterval(() => pollGoogleDriveForNewFiles().catch(e => log('warn', 'drive_poll_error', { error: e.message })), DRIVE_POLL_MS);
     } else {
-      console.log(`[drive-poll] disabled: ${google.disabledReason()}`);
+      log('info', 'drive_poll_disabled', { reason: google.disabledReason() });
     }
 
     if (comms.isEnabled()) {
       const COMMS_PUSH_MS = parseInt(process.env.COMMS_PUSH_INTERVAL_MS || String(15 * 60 * 1000), 10);
       const runPush = () => runCommsPushAndRecord()
         .then(r => {
-          if (r.skipped) { if (DEBUG) console.log(`[comms-push] skipped: ${r.reason}`); return; }
-          if (r.ok)     console.log(`[comms-push] pushed ${r.pushed} contacts`);
-          else          console.warn(`[comms-push] failed after ${r.pushed}: ${r.error}`);
+          if (r.skipped) { log('debug', 'comms_push_skipped', { reason: r.reason }); return; }
+          if (r.ok)     log('info', 'comms_push_ok', { pushed: r.pushed });
+          else          log('warn', 'comms_push_failed', { pushed: r.pushed, error: r.error });
         })
-        .catch(e => console.warn('[comms-push]', e.message));
+        .catch(e => log('warn', 'comms_push_error', { error: e.message }));
       setTimeout(runPush, 5000);
       setInterval(runPush, COMMS_PUSH_MS);
     } else {
       commsState.last_outcome = 'disabled';
       commsState.last_skipped_reason = comms.disabledReason();
-      console.log(`[comms-push] disabled: ${comms.disabledReason()}`);
+      log('info', 'comms_push_disabled', { reason: comms.disabledReason() });
     }
 
     // ── Scan-image backup (rclone → R2) ────────────────────────────────────
@@ -5203,7 +5286,7 @@ if (require.main === module) {
       execFile('/bin/bash', [scanBackupScript], { timeout: 30 * 60 * 1000 }, (err, stdout, stderr) => {
         if (stdout) process.stdout.write(stdout);
         if (stderr) process.stderr.write(stderr);
-        if (err) console.warn('[scan-backup] failed:', err.message);
+        if (err) log('warn', 'scan_backup_failed', { error: err.message });
       });
     };
     // Delay the first run so we don't hammer the machine during boot.
